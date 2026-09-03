@@ -3,7 +3,10 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/dariomory/nomadwifi/pkg/cluster"
@@ -36,8 +39,27 @@ func DefaultConfig() Config {
 	}
 }
 
-// StartMonitor runs the background monitoring loop.
+// GetLogPath returns the path to the persistent NomadWiFi log file.
+func GetLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	dir := filepath.Join(home, ".nomadwifi")
+	_ = os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, "nomadwifi.log")
+}
+
+// StartMonitor runs the background monitoring loop with dual logging (console + file).
 func StartMonitor(ctx context.Context, cfg Config) error {
+	logPath := GetLogPath()
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err == nil {
+		defer f.Close()
+		log.SetOutput(io.MultiWriter(os.Stdout, f))
+	}
+
+	log.Printf("[NomadWiFi] Logging to %s\n", logPath)
 	log.Printf("[NomadWiFi] Monitoring active Wi-Fi every %v (AutoRoam: %v, Prefer5GHz: %v)\n",
 		cfg.PollInterval, cfg.AutoRoam, cfg.Prefer5GHz)
 

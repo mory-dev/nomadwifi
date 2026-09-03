@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -17,12 +18,12 @@ import (
 )
 
 func main() {
-	tui.PrintBanner()
-
 	if len(os.Args) < 2 {
-		runStatus()
+		runInteractiveMenu()
 		return
 	}
+
+	tui.PrintBanner()
 
 	command := strings.ToLower(os.Args[1])
 	switch command {
@@ -34,6 +35,8 @@ func main() {
 		runOptimize()
 	case "watch", "daemon":
 		runDaemon()
+	case "logs", "log":
+		runLogs()
 	case "connect":
 		if len(os.Args) < 3 {
 			fmt.Println("Usage: nomadwifi connect <SSID>")
@@ -48,6 +51,61 @@ func main() {
 	}
 }
 
+func runInteractiveMenu() {
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		tui.PrintBanner()
+		status, err := wifi.GetInterfaceStatus()
+		if err == nil && status != nil {
+			tui.PrintStatus(status)
+		}
+
+		fmt.Println("Select an option:")
+		fmt.Println("  [1] Refresh Status")
+		fmt.Println("  [2] Scan All Nearby Wi-Fi Networks")
+		fmt.Println("  [3] One-Click Auto-Optimize (Switch to fastest 5GHz AP)")
+		fmt.Println("  [4] Start Background Auto-Roam Watcher")
+		fmt.Println("  [5] View Logs")
+		fmt.Println("  [6] Exit")
+		fmt.Print("\nEnter choice (1-6): ")
+
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			break
+		}
+		choice := strings.TrimSpace(input)
+
+		switch choice {
+		case "1":
+			continue
+		case "2":
+			runScan()
+			pausePrompt(reader)
+		case "3":
+			runOptimize()
+			pausePrompt(reader)
+		case "4":
+			runDaemon()
+			pausePrompt(reader)
+		case "5":
+			runLogs()
+			pausePrompt(reader)
+		case "6", "q", "exit":
+			fmt.Println("Exiting NomadWiFi.")
+			return
+		default:
+			fmt.Println("Invalid selection.")
+			time.Sleep(1 * time.Second)
+		}
+	}
+}
+
+func pausePrompt(reader *bufio.Reader) {
+	fmt.Print("\nPress Enter to return to menu...")
+	_, _ = reader.ReadString('\n')
+}
+
 func runStatus() {
 	status, err := wifi.GetInterfaceStatus()
 	if err != nil {
@@ -57,7 +115,6 @@ func runStatus() {
 	tui.PrintStatus(status)
 
 	if status.Connected {
-		// Look for quick optimization hint
 		aps, err := wifi.ScanNetworks()
 		if err == nil && len(aps) > 0 {
 			betterAP, reason := cluster.FindAlternativeInCluster(status.SSID, aps, 10.0)
@@ -104,7 +161,6 @@ func runOptimize() {
 
 	betterAP, reason := cluster.FindAlternativeInCluster(status.SSID, aps, 5.0)
 	if betterAP == nil {
-		// If no cluster alternative, check global top-scored AP
 		if len(aps) > 0 && aps[0].QualityScore > 75 && !strings.EqualFold(aps[0].SSID, status.SSID) {
 			betterAP = &aps[0]
 			reason = "Top-scoring access point in range"
@@ -148,10 +204,35 @@ func runDaemon() {
 
 	fmt.Printf("🛡️ Starting NomadWiFi Background Roaming Monitor (Interval: %ds, AutoRoam: %v)\n",
 		*intervalSec, cfg.AutoRoam)
+	fmt.Printf("📁 Log file: %s\n", daemon.GetLogPath())
 	fmt.Println("Press Ctrl+C to stop.")
 
 	if err := daemon.StartMonitor(ctx, cfg); err != nil {
 		fmt.Printf("Daemon error: %v\n", err)
+	}
+}
+
+func runLogs() {
+	logPath := daemon.GetLogPath()
+	fmt.Printf("📁 Log file path: %s\n\n", logPath)
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		fmt.Println("No logs recorded yet. Run 'nomadwifi watch' to start logging.")
+		return
+	}
+
+	lines := strings.Split(string(data), "\n")
+	start := 0
+	if len(lines) > 30 {
+		start = len(lines) - 30
+	}
+
+	fmt.Println("--- Recent Log Entries ---")
+	for _, l := range lines[start:] {
+		if strings.TrimSpace(l) != "" {
+			fmt.Println(l)
+		}
 	}
 }
 
@@ -166,9 +247,11 @@ func runConnect(ssid string) {
 
 func printHelp() {
 	fmt.Println("Available Commands:")
+	fmt.Println("  nomadwifi                   Open interactive terminal menu (safe for double-click)")
 	fmt.Println("  nomadwifi status            Show active link stats, band, gateway latency & captive portal")
 	fmt.Println("  nomadwifi scan              Scan all surrounding APs and list them ranked by quality score")
 	fmt.Println("  nomadwifi optimize          Analyze and auto-switch to the best 5GHz/high-speed hotel AP")
 	fmt.Println("  nomadwifi watch [--dry-run] Run background daemon to actively monitor and auto-roam")
+	fmt.Println("  nomadwifi logs              Display recent activity logs and log file path")
 	fmt.Println("  nomadwifi connect <SSID>    Connect directly to a specific Wi-Fi network")
 }
