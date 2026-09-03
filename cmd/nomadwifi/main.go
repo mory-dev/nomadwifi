@@ -9,21 +9,50 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/dariomory/nomadwifi/pkg/cluster"
 	"github.com/dariomory/nomadwifi/pkg/daemon"
+	"github.com/dariomory/nomadwifi/pkg/gui"
 	"github.com/dariomory/nomadwifi/pkg/tui"
 	"github.com/dariomory/nomadwifi/pkg/wifi"
 )
 
+var (
+	kernel32              = syscall.NewLazyDLL("kernel32.dll")
+	procGetConsoleProcList = kernel32.NewProc("GetConsoleProcessList")
+)
+
+// IsLaunchedFromExplorer checks if Windows allocated a new console for this process (double-click).
+func IsLaunchedFromExplorer() bool {
+	var processList [2]uint32
+	count, _, _ := procGetConsoleProcList.Call(
+		uintptr(unsafe.Pointer(&processList[0])),
+		uintptr(len(processList)),
+	)
+	return count == 1
+}
+
 func main() {
+	// If double-clicked from File Explorer without args, automatically launch GUI!
 	if len(os.Args) < 2 {
+		if IsLaunchedFromExplorer() {
+			if err := gui.Launch(); err == nil {
+				return
+			}
+		}
+		// In interactive terminal, run the interactive TUI menu
 		runInteractiveMenu()
 		return
 	}
 
 	command := strings.ToLower(os.Args[1])
 	switch command {
+	case "gui", "--gui", "-g":
+		if err := gui.Launch(); err != nil {
+			fmt.Printf("Failed to launch GUI: %v\nFalling back to terminal mode.\n", err)
+			runInteractiveMenu()
+		}
 	case "status":
 		runStatus(true)
 	case "scan":
@@ -64,7 +93,8 @@ func runInteractiveMenu() {
 		fmt.Printf("  %s[3]%s One-Click Auto-Optimize (5GHz) %s[O]%s\n", tui.ColorBold+tui.ColorGreen, tui.ColorReset, tui.ColorBold+tui.ColorGreen, tui.ColorReset)
 		fmt.Printf("  %s[4]%s Auto-Roam Watcher Daemon       %s[W]%s\n", tui.ColorBold+tui.ColorCyan, tui.ColorReset, tui.ColorBold+tui.ColorCyan, tui.ColorReset)
 		fmt.Printf("  %s[5]%s View Roam Logs                 %s[L]%s\n", tui.ColorBold+tui.ColorCyan, tui.ColorReset, tui.ColorBold+tui.ColorCyan, tui.ColorReset)
-		fmt.Printf("  %s[6]%s Exit                           %s[Q]%s\n", tui.ColorBold+tui.ColorRed, tui.ColorReset, tui.ColorBold+tui.ColorRed, tui.ColorReset)
+		fmt.Printf("  %s[6]%s Launch Desktop GUI             %s[G]%s\n", tui.ColorBold+tui.ColorCyan, tui.ColorReset, tui.ColorBold+tui.ColorCyan, tui.ColorReset)
+		fmt.Printf("  %s[7]%s Exit                           %s[Q]%s\n", tui.ColorBold+tui.ColorRed, tui.ColorReset, tui.ColorBold+tui.ColorRed, tui.ColorReset)
 		fmt.Print("\nChoice > ")
 
 		key := tui.ReadKey()
@@ -72,7 +102,6 @@ func runInteractiveMenu() {
 
 		switch choice {
 		case "1", "r":
-			// Refreshes loop immediately
 			continue
 		case "2", "s":
 			tui.ClearScreen()
@@ -94,7 +123,12 @@ func runInteractiveMenu() {
 			tui.PrintBanner()
 			runLogs()
 			pauseKey()
-		case "6", "q", "\x03", "\x1b": // 6, q, Ctrl+C, Esc
+		case "6", "g":
+			if err := gui.Launch(); err != nil {
+				fmt.Printf("GUI error: %v\n", err)
+				pauseKey()
+			}
+		case "7", "q", "\x03", "\x1b":
 			tui.ClearScreen()
 			fmt.Println("Exiting NomadWiFi.")
 			return
@@ -252,7 +286,8 @@ func runConnect(ssid string) {
 func printHelp() {
 	tui.PrintBanner()
 	fmt.Println("Available Commands:")
-	fmt.Println("  nomadwifi                   Open interactive terminal menu (instant keypress)")
+	fmt.Println("  nomadwifi                   Open interactive terminal menu (or GUI when double-clicked)")
+	fmt.Println("  nomadwifi gui               Launch the modern desktop GUI window")
 	fmt.Println("  nomadwifi status            Show active link stats, band, gateway latency & captive portal")
 	fmt.Println("  nomadwifi scan              Scan all surrounding APs and list them ranked by quality score")
 	fmt.Println("  nomadwifi optimize          Analyze and auto-switch to the best 5GHz/high-speed hotel AP")
