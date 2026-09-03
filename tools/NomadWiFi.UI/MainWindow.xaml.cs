@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -28,14 +28,32 @@ namespace NomadWiFi.UI
             InitializeComponent();
             SetupSystemTray();
 
-            _pollTimer.Interval = TimeSpan.FromSeconds(4);
-            _pollTimer.Tick += async (s, e) => await RefreshStatusAsync();
+            // Auto-refresh every 5 seconds ONLY when window is open and in view
+            _pollTimer.Interval = TimeSpan.FromSeconds(5);
+            _pollTimer.Tick += async (s, e) =>
+            {
+                if (!IsVisible || WindowState == WindowState.Minimized)
+                {
+                    return; // 0% CPU overhead when in tray or minimized
+                }
+                await RefreshStatusAsync();
+                await RefreshScanAsync();
+            };
             _pollTimer.Start();
 
             Loaded += async (s, e) =>
             {
                 await RefreshStatusAsync();
                 await RefreshScanAsync();
+            };
+
+            StateChanged += async (s, e) =>
+            {
+                if (WindowState != WindowState.Minimized && IsVisible)
+                {
+                    await RefreshStatusAsync();
+                    await RefreshScanAsync();
+                }
             };
 
             Closing += MainWindow_Closing;
@@ -97,13 +115,15 @@ namespace NomadWiFi.UI
             }
         }
 
-
-
-        private void RestoreFromTray()
+        private async void RestoreFromTray()
         {
             Show();
             WindowState = WindowState.Normal;
             Activate();
+
+            // Immediate fresh diagnostic on restore into view
+            await RefreshStatusAsync();
+            await RefreshScanAsync();
         }
 
         private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -220,11 +240,9 @@ namespace NomadWiFi.UI
 
             try
             {
-                TxtStatusMsg.Text = "Scanning nearby networks...";
                 var aps = await _client.ScanNetworksAsync();
                 ItemsAccessPoints.ItemsSource = aps;
                 TxtApCount.Text = string.Format("{0} APs in range", aps.Count);
-                TxtStatusMsg.Text = "";
             }
             catch (Exception ex)
             {
@@ -272,12 +290,6 @@ namespace NomadWiFi.UI
             }
         }
 
-        private async void BtnRefresh_Click(object sender, RoutedEventArgs e)
-        {
-            await RefreshStatusAsync();
-            await RefreshScanAsync();
-        }
-
         private async void BtnConnect_Click(object sender, RoutedEventArgs e)
         {
             var btn = sender as Button;
@@ -292,6 +304,7 @@ namespace NomadWiFi.UI
                     {
                         TxtStatusMsg.Text = string.Format("Connected to {0}!", ssid);
                         await RefreshStatusAsync();
+                        await RefreshScanAsync();
                     }
                     else
                     {
