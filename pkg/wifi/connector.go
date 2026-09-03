@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-
 // GetInterfaceStatus returns current Wi-Fi adapter connection state and diagnostics.
 func GetInterfaceStatus() (*InterfaceStatus, error) {
 	cmd := SilentCommand("netsh", "wlan", "show", "interfaces")
@@ -85,15 +84,33 @@ func GetInterfaceStatus() (*InterfaceStatus, error) {
 	return status, nil
 }
 
-// ConnectSSID initiates connection to a saved or visible Wi-Fi profile.
+// ConnectSSID initiates connection to an SSID, auto-provisioning Wi-Fi profiles from hotel passwords if needed.
 func ConnectSSID(ssid string) error {
+	// If profile does not exist, attempt hotel password guessing and profile synthesis
+	if !HasProfile(ssid) {
+		pwd, source := GuessPasswordForSSID(ssid)
+		if pwd != "" {
+			if err := AddWifiProfile(ssid, pwd); err != nil {
+				return fmt.Errorf("failed to auto-provision profile with password from %s: %w", source, err)
+			}
+		}
+	}
+
 	cmd := SilentCommand("netsh", "wlan", "connect", fmt.Sprintf("name=%s", ssid))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("connection failed: %w (output: %s)", err, string(out))
 	}
-	// Give interface a second to handshake
-	time.Sleep(2 * time.Second)
+
+	// Poll interface for up to 4 seconds to verify connection
+	for i := 0; i < 8; i++ {
+		time.Sleep(500 * time.Millisecond)
+		status, err := GetInterfaceStatus()
+		if err == nil && status != nil && status.Connected && strings.EqualFold(status.SSID, ssid) {
+			return nil
+		}
+	}
+
 	return nil
 }
 
@@ -102,4 +119,3 @@ func Disconnect() error {
 	cmd := SilentCommand("netsh", "wlan", "disconnect")
 	return cmd.Run()
 }
-
