@@ -86,6 +86,8 @@ func GetInterfaceStatus() (*InterfaceStatus, error) {
 
 // ConnectSSID initiates connection to an SSID, auto-provisioning Wi-Fi profiles from hotel passwords if needed.
 func ConnectSSID(ssid string) error {
+	newlyProvisioned := false
+
 	// If profile does not exist, attempt hotel password guessing and profile synthesis
 	if !HasProfile(ssid) {
 		pwd, source := GuessPasswordForSSID(ssid)
@@ -93,12 +95,18 @@ func ConnectSSID(ssid string) error {
 			if err := AddWifiProfile(ssid, pwd); err != nil {
 				return fmt.Errorf("failed to auto-provision profile with password from %s: %w", source, err)
 			}
+			newlyProvisioned = true
+		} else {
+			return fmt.Errorf("no known or inferable password for network '%s'", ssid)
 		}
 	}
 
 	cmd := SilentCommand("netsh", "wlan", "connect", fmt.Sprintf("name=%s", ssid))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if newlyProvisioned {
+			_ = DeleteWifiProfile(ssid)
+		}
 		return fmt.Errorf("connection failed: %w (output: %s)", err, string(out))
 	}
 
@@ -111,7 +119,12 @@ func ConnectSSID(ssid string) error {
 		}
 	}
 
-	return nil
+	// If handshake failed to connect within timeout and it was newly provisioned, clean it up!
+	if newlyProvisioned {
+		_ = DeleteWifiProfile(ssid)
+	}
+
+	return fmt.Errorf("authentication or connection timed out for '%s'", ssid)
 }
 
 // Disconnect disconnects the active Wi-Fi connection.

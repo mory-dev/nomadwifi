@@ -24,9 +24,6 @@ var (
 )
 
 // ExtractVenueRoot normalizes an SSID down to its core venue identifier.
-// e.g. "SMFLoor21_5G" -> "smfloor"
-// e.g. "SM Resort-5G" -> "sm resort"
-// e.g. "BaanNT_5G" -> "baannt"
 func ExtractVenueRoot(ssid string) string {
 	clean := strings.TrimSpace(ssid)
 	if clean == "" || clean == "[Hidden SSID]" {
@@ -68,13 +65,11 @@ func IsSameHotelVenue(ssidA, ssidB string) bool {
 		return true
 	}
 
-	// Prefix match with significant length (e.g. "sm resort" and "smfloor" both start with "sm")
-	// Only match short 2-letter codes if followed by word boundary or case change (e.g. "SM" in "SM Resort" & "SMFloor")
+	// Prefix match with significant length
 	sA := strings.ToLower(strings.TrimSpace(ssidA))
 	sB := strings.ToLower(strings.TrimSpace(ssidB))
 
 	if strings.HasPrefix(sA, "sm") && strings.HasPrefix(sB, "sm") {
-		// Both are part of the SM hotel chain / property
 		return true
 	}
 
@@ -144,7 +139,6 @@ func GetProfilePassword(profileName string) (string, error) {
 }
 
 // GuessPasswordForSSID searches related hotel cluster profiles to find the most likely shared password.
-// Returns (password, sourceProfileName) ONLY if a valid venue cluster match exists.
 func GuessPasswordForSSID(targetSSID string) (string, string) {
 	cleanTarget := strings.TrimSpace(targetSSID)
 	if cleanTarget == "" || cleanTarget == "[Hidden SSID]" {
@@ -175,7 +169,6 @@ func GuessPasswordForSSID(targetSSID string) (string, string) {
 		}
 	}
 
-	// No legitimate cluster match found -> DO NOT GUESS.
 	return "", ""
 }
 
@@ -223,4 +216,10 @@ func AddWifiProfile(ssid, password string) error {
 		return fmt.Errorf("netsh add profile failed: %w (out: %s)", err, string(out))
 	}
 	return nil
+}
+
+// DeleteWifiProfile removes a profile from Windows.
+func DeleteWifiProfile(ssid string) error {
+	cmd := SilentCommand("netsh", "wlan", "delete", "profile", fmt.Sprintf("name=%s", ssid))
+	return cmd.Run()
 }
