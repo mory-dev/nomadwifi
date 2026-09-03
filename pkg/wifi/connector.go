@@ -78,8 +78,9 @@ func GetInterfaceStatus() (*InterfaceStatus, error) {
 		if status.GatewayIP != "" {
 			status.GatewayLatencyMs, status.PacketLossPercent = PingGateway(status.GatewayIP)
 		}
-		status.CaptivePortal = CheckCaptivePortal()
+		status.CaptivePortal, status.CaptivePortalURL = CheckCaptivePortal()
 	}
+
 
 	return status, nil
 }

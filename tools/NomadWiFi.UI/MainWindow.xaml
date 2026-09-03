@@ -2,8 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="NomadWiFi - Hotel &amp; Travel Roaming Optimizer"
-        Height="670" Width="870"
-        MinHeight="550" MinWidth="750"
+        Height="730" Width="880"
+        MinHeight="580" MinWidth="760"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         Background="#0D1117"
@@ -22,6 +22,7 @@
         <SolidColorBrush x:Key="AccentBlue" Color="#58A6FF" />
         <SolidColorBrush x:Key="AccentYellow" Color="#D29922" />
         <SolidColorBrush x:Key="AccentRed" Color="#F85149" />
+        <SolidColorBrush x:Key="AccentPurple" Color="#A855F7" />
 
         <!-- TitleBar Window Caption Buttons -->
         <Style x:Key="CaptionBtn" TargetType="Button">
@@ -138,7 +139,6 @@
 
             <!-- Custom Dark TitleBar -->
             <Grid Grid.Row="0" Background="{StaticResource TitleBarBg}" MouseDown="TitleBar_MouseDown">
-                <!-- Title, Logo & Badge -->
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
                     <TextBlock Text="🧭" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0" />
                     <TextBlock Text="Nomad" FontSize="12" FontWeight="Bold" Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center" />
@@ -154,19 +154,41 @@
                     <Button x:Name="BtnMaximize" Content="▢" Style="{StaticResource CaptionBtn}" Click="BtnMaximize_Click" ToolTip="Maximize" />
                     <Button Content="✕" Style="{StaticResource CloseCaptionBtn}" Click="BtnClose_Click" ToolTip="Minimize to System Tray" />
                 </StackPanel>
-
             </Grid>
 
             <!-- Main Body Content -->
-            <Grid Grid.Row="1" Margin="20,16,20,16">
+            <Grid Grid.Row="1" Margin="18,14,18,14">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <!-- Active Hero Connection Card -->
-                <Border Grid.Row="0" Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="12" Padding="18" Margin="0,0,0,14">
+                <!-- 1. Captive Portal Alert Banner (Appears when hotel login page is intercepted) -->
+                <Border x:Name="BorderCaptivePortal" Grid.Row="0" Visibility="Collapsed" Background="#D2992222" BorderBrush="#D29922" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,0,10">
+                    <Grid>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="⚠️" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center" />
+                            <TextBlock Text="Hotel Web Login Intercepted — Guest portal authentication is required." FontWeight="SemiBold" Foreground="#F0883E" FontSize="12" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Button Content="🔑 Open Hotel Login Page" Style="{StaticResource SecondaryBtn}" Padding="10,4" FontSize="11" HorizontalAlignment="Right" Click="BtnOpenCaptive_Click" />
+                    </Grid>
+                </Border>
+
+                <!-- 2. Roam Upgrade Celebration Banner -->
+                <Border x:Name="BorderRoamCelebration" Grid.Row="0" Visibility="Collapsed" Background="#10B98122" BorderBrush="#10B981" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,0,10">
+                    <Grid>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="🎉" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center" />
+                            <TextBlock x:Name="TxtRoamCelebrationMsg" Text="Auto-Roamed to 5 GHz! Speed upgraded from 54 Mbps ➔ 351 Mbps (6.5x faster)" FontWeight="Bold" Foreground="{StaticResource AccentGreen}" FontSize="12" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Button Content="✕" Style="{StaticResource CaptionBtn}" Width="24" Height="24" HorizontalAlignment="Right" Click="BtnDismissCelebration_Click" />
+                    </Grid>
+                </Border>
+
+                <!-- Active Hero Connection Card with Real-Time Latency Sparkline -->
+                <Border Grid.Row="1" Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -186,30 +208,51 @@
                             </Border>
                         </Grid>
 
-                        <!-- Middle Row: Metrics Grid -->
-                        <UniformGrid Grid.Row="1" Columns="3" Margin="0,14,0,0">
-                            <Border Background="#121822" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,6,0">
+                        <!-- Middle Row: Metrics Grid + Real-Time Jitter Sparkline -->
+                        <Grid Grid.Row="1" Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.2*" />
+                                <ColumnDefinition Width="1.2*" />
+                                <ColumnDefinition Width="2.2*" />
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Signal Metric -->
+                            <Border Grid.Column="0" Background="#121822" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,6,0">
                                 <StackPanel HorizontalAlignment="Center">
                                     <TextBlock x:Name="TxtSignal" Text="-- %" FontSize="17" FontWeight="Bold" Foreground="{StaticResource TextPrimary}" HorizontalAlignment="Center" />
                                     <TextBlock Text="Signal Strength" FontSize="11" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,2,0,0" />
                                 </StackPanel>
                             </Border>
-                            <Border Background="#121822" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="3,0,3,0">
+
+                            <!-- Link Speed Metric -->
+                            <Border Grid.Column="1" Background="#121822" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="3,0,6,0">
                                 <StackPanel HorizontalAlignment="Center">
                                     <TextBlock x:Name="TxtSpeed" Text="-- Mbps" FontSize="17" FontWeight="Bold" Foreground="{StaticResource TextPrimary}" HorizontalAlignment="Center" />
                                     <TextBlock Text="Link Speed" FontSize="11" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,2,0,0" />
                                 </StackPanel>
                             </Border>
-                            <Border Background="#121822" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="6,0,0,0">
-                                <StackPanel HorizontalAlignment="Center">
-                                    <TextBlock x:Name="TxtLatency" Text="-- ms" FontSize="17" FontWeight="Bold" Foreground="{StaticResource TextPrimary}" HorizontalAlignment="Center" />
-                                    <TextBlock Text="Gateway Latency" FontSize="11" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,2,0,0" />
-                                </StackPanel>
+
+                            <!-- Gateway Latency & Real-Time Sparkline -->
+                            <Border Grid.Column="2" Background="#121822" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="8" Padding="10,8" Margin="3,0,0,0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,10,0">
+                                        <TextBlock x:Name="TxtLatency" Text="-- ms" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimary}" />
+                                        <TextBlock x:Name="TxtJitter" Text="Jitter: -- ms" FontSize="10" Foreground="{StaticResource TextSecondary}" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                    <Canvas x:Name="CanvasSparkline" Grid.Column="1" Height="32" VerticalAlignment="Center" ClipToBounds="True">
+                                        <Polygon x:Name="PolygonSparklineArea" Fill="#10B98122" />
+                                        <Polyline x:Name="PolylineSparkline" Stroke="#10B981" StrokeThickness="2" />
+                                    </Canvas>
+                                </Grid>
                             </Border>
-                        </UniformGrid>
+                        </Grid>
 
                         <!-- Action Button Row with Rich Explanatory Hover ToolTip -->
-                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,14,0,0">
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
                             <Button x:Name="BtnOptimize" Content="⚡ Auto-Optimize 5GHz" Style="{StaticResource PrimaryBtn}" Click="BtnOptimize_Click">
                                 <Button.ToolTip>
                                     <ToolTip Background="#161B22" BorderBrush="#30363D" BorderThickness="1" Foreground="#F0F6FC" Padding="14,12">
@@ -228,7 +271,7 @@
                 </Border>
 
                 <!-- Access Points List Card (Expanded Vertical Area) -->
-                <Border Grid.Row="1" Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
+                <Border Grid.Row="2" Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,10">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -300,14 +343,14 @@
                     </Grid>
                 </Border>
 
-                <!-- Footer Card -->
-                <Border Grid.Row="2" Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="10" Padding="12,8">
+                <!-- Footer Card with Autonomous Watchdog & Startup Controls -->
+                <Border Grid.Row="3" Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="10" Padding="14,9">
                     <Grid>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="🛡️" FontSize="15" VerticalAlignment="Center" Margin="0,0,8,0" />
-                            <TextBlock Text="Hotel Auto-Roam Watcher is active in background (Hot-Standby Pre-warming ON)" FontSize="12" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
+                            <CheckBox x:Name="ChkAutoRoam" Content="🛡️ Autonomous Auto-Roam Watchdog" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" Margin="0,0,18,0" Click="ChkAutoRoam_Click" ToolTip="Silently monitors signal &amp; latency in the background and auto-switches to 5GHz when needed" />
+                            <CheckBox x:Name="ChkStartup" Content="🚀 Start with Windows" Foreground="{StaticResource TextSecondary}" FontSize="12" VerticalAlignment="Center" Click="ChkStartup_Click" ToolTip="Automatically start NomadWiFi minimized to system tray on boot" />
                         </StackPanel>
-                        <TextBlock Text="NomadWiFi v1.0" FontSize="11" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                        <TextBlock Text="NomadWiFi v1.1 • Enterprise" FontSize="11" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                     </Grid>
                 </Border>
             </Grid>

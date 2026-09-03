@@ -57,7 +57,9 @@ type InterfaceStatus struct {
 	GatewayLatencyMs  float64 `json:"gateway_latency_ms,omitempty"`
 	PacketLossPercent float64 `json:"packet_loss_percent,omitempty"`
 	CaptivePortal     bool    `json:"captive_portal"`
+	CaptivePortalURL  string  `json:"captive_portal_url,omitempty"`
 }
+
 
 func (ap AccessPoint) String() string {
 	return fmt.Sprintf("%-20s | %-6s | Ch %-3d | %-8s | %3d%% (Score: %.1f, Status: %s, Warm: %v)",

@@ -22,7 +22,9 @@ namespace NomadWiFi.UI.Models
         public double gateway_latency_ms { get; set; }
         public double packet_loss_percent { get; set; }
         public bool captive_portal { get; set; }
+        public string captive_portal_url { get; set; }
     }
+
 
     public class AccessPoint
     {

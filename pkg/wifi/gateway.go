@@ -35,7 +35,6 @@ func GetDefaultGateway() string {
 }
 
 // PingGateway measures gateway round-trip time in milliseconds.
-// Uses fast in-process TCP dial first (0 subprocesses), with silent ping fallback.
 func PingGateway(gwIP string) (avgMs float64, packetLoss float64) {
 	if gwIP == "" {
 		return 0, 100.0
@@ -54,7 +53,7 @@ func PingGateway(gwIP string) (avgMs float64, packetLoss float64) {
 		}
 	}
 
-	// Fallback to silent ping (CREATE_NO_WINDOW so zero console windows spawn)
+	// Fallback to silent ping
 	cmd := SilentCommand("ping", "-n", "2", "-w", "500", gwIP)
 	out, err := cmd.Output()
 	if err != nil {
@@ -82,8 +81,8 @@ func PingGateway(gwIP string) (avgMs float64, packetLoss float64) {
 	return avgMs, packetLoss
 }
 
-// CheckCaptivePortal probes Google HTTP 204 endpoint.
-func CheckCaptivePortal() bool {
+// CheckCaptivePortal probes connectivity and returns whether a captive portal was intercepted, along with the login URL.
+func CheckCaptivePortal() (isIntercepted bool, portalURL string) {
 	client := &http.Client{
 		Timeout: 2 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -96,14 +95,23 @@ func CheckCaptivePortal() bool {
 
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://connectivitycheck.gstatic.com/generate_204", nil)
 	if err != nil {
-		return false
+		return false, ""
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return false
+		return false, ""
 	}
 	defer resp.Body.Close()
 
-	return resp.StatusCode != http.StatusNoContent
+	if resp.StatusCode == http.StatusNoContent {
+		return false, ""
+	}
+
+	// Intercepted! Extract redirect location or fallback to neverssl
+	redirectLoc := resp.Header.Get("Location")
+	if redirectLoc == "" {
+		redirectLoc = "http://neverssl.com"
+	}
+	return true, redirectLoc
 }

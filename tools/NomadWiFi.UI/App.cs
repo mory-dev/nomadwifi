@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Windows;
 
 namespace NomadWiFi.UI
@@ -6,7 +7,7 @@ namespace NomadWiFi.UI
     public static class App
     {
         [STAThread]
-        public static void Main()
+        public static void Main(string[] args)
         {
             try
             {
@@ -14,8 +15,13 @@ namespace NomadWiFi.UI
                 {
                     ShutdownMode = ShutdownMode.OnExplicitShutdown
                 };
-                var win = new MainWindow();
-                app.Run(win);
+                bool startMinimized = args != null && args.Any(a => string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase));
+                var win = new MainWindow(startMinimized);
+                if (!startMinimized)
+                {
+                    win.Show();
+                }
+                app.Run();
             }
             catch (Exception ex)
             {
