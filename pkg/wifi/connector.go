@@ -81,7 +81,6 @@ func GetInterfaceStatus() (*InterfaceStatus, error) {
 		status.CaptivePortal, status.CaptivePortalURL = CheckCaptivePortal()
 	}
 
-
 	return status, nil
 }
 
@@ -126,6 +125,33 @@ func ConnectSSID(ssid string) error {
 	}
 
 	return fmt.Errorf("authentication or connection timed out for '%s'", ssid)
+}
+
+// ConnectSSIDWithPassword registers a user-entered password and establishes connection.
+// If the connection fails, the temporary profile is immediately deleted to keep profiles clean.
+func ConnectSSIDWithPassword(ssid, password string) error {
+	if err := AddWifiProfile(ssid, password); err != nil {
+		return fmt.Errorf("failed to configure network profile: %w", err)
+	}
+
+	cmd := SilentCommand("netsh", "wlan", "connect", fmt.Sprintf("name=%s", ssid))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		_ = DeleteWifiProfile(ssid)
+		return fmt.Errorf("connection failed: %w (output: %s)", err, string(out))
+	}
+
+	// Poll interface for up to 5 seconds to verify connection
+	for i := 0; i < 10; i++ {
+		time.Sleep(500 * time.Millisecond)
+		status, err := GetInterfaceStatus()
+		if err == nil && status != nil && status.Connected && strings.EqualFold(status.SSID, ssid) {
+			return nil
+		}
+	}
+
+	_ = DeleteWifiProfile(ssid)
+	return fmt.Errorf("authentication failed: incorrect password or connection timed out")
 }
 
 // Disconnect disconnects the active Wi-Fi connection.

@@ -51,11 +51,19 @@ func main() {
 			if isJSON {
 				fmt.Println(`{"error":"Missing SSID parameter"}`)
 			} else {
-				fmt.Println("Usage: nomadwifi connect <SSID>")
+				fmt.Println("Usage: nomadwifi connect <SSID> [--password <password>]")
 			}
 			os.Exit(1)
 		}
-		runConnect(os.Args[2], isJSON)
+		ssid := os.Args[2]
+		var customPwd string
+		for i := 3; i < len(os.Args)-1; i++ {
+			if os.Args[i] == "--password" || os.Args[i] == "-p" {
+				customPwd = os.Args[i+1]
+				break
+			}
+		}
+		runConnectWithPassword(ssid, customPwd, isJSON)
 	case "help", "-h", "--help":
 		printHelp()
 	default:
@@ -107,32 +115,30 @@ func runInteractiveMenu() {
 			tui.ClearScreen()
 			tui.PrintBanner()
 			runDaemon(false)
-			pauseKey()
 		case "5", "l":
 			tui.ClearScreen()
 			tui.PrintBanner()
 			runLogs(false)
 			pauseKey()
-		case "6", "q", "\x03", "\x1b":
-			tui.ClearScreen()
-			fmt.Println("Exiting NomadWiFi.")
+		case "6", "q":
+			fmt.Println("\nExiting NomadWiFi.")
 			return
 		}
 	}
 }
 
 func pauseKey() {
-	fmt.Printf("\n%sPress any key to return to menu...%s", tui.ColorYellow, tui.ColorReset)
-	_ = tui.ReadKey()
+	fmt.Println("Press any key to return to menu...")
+	tui.ReadKey()
 }
 
-func runStatus(printBanner, asJSON bool) {
+func runStatus(printBanner bool, asJSON bool) {
 	status, err := wifi.GetInterfaceStatus()
 	if err != nil {
 		if asJSON {
-			fmt.Printf(`{"error":%q}`+"\n", err.Error())
+			fmt.Println(`{"connected":false,"error":"Failed to query Wi-Fi adapter"}`)
 		} else {
-			fmt.Printf("Error querying Wi-Fi interface: %v\n", err)
+			fmt.Printf("Error: %v\n", err)
 		}
 		return
 	}
@@ -147,34 +153,24 @@ func runStatus(printBanner, asJSON bool) {
 		tui.PrintBanner()
 	}
 	tui.PrintStatus(status)
-
-	if status.Connected {
-		aps, err := wifi.ScanNetworks()
-		if err == nil && len(aps) > 0 {
-			betterAP, reason := cluster.FindAlternativeInCluster(status.SSID, aps, 10.0)
-			if betterAP != nil {
-				fmt.Printf("%s💡 Optimization Available:%s Found %s (%s, Score: %.1f)\n",
-					tui.ColorBold+tui.ColorYellow, tui.ColorReset, betterAP.SSID, betterAP.Band, betterAP.QualityScore)
-				fmt.Printf("   Reason: %s\n", reason)
-				fmt.Printf("   Run %snomadwifi optimize%s to switch automatically.\n\n", tui.ColorBold+tui.ColorGreen, tui.ColorReset)
-			}
-		}
-	}
 }
 
 func runScan(asJSON bool) {
 	status, _ := wifi.GetInterfaceStatus()
 	currentBSSID := ""
-	if status != nil {
+	if status != nil && status.Connected {
 		currentBSSID = status.BSSID
 	}
 
+	if !asJSON {
+		fmt.Println("🔍 Scanning surrounding Wi-Fi networks and scoring quality...")
+	}
 	aps, err := wifi.ScanNetworks()
 	if err != nil {
 		if asJSON {
-			fmt.Printf(`{"error":%q}`+"\n", err.Error())
+			fmt.Println(`{"error":"Failed to scan Wi-Fi networks"}`)
 		} else {
-			fmt.Printf("Scan failed: %v\n", err)
+			fmt.Printf("Scan error: %v\n", err)
 		}
 		return
 	}
@@ -185,19 +181,18 @@ func runScan(asJSON bool) {
 		return
 	}
 
-	fmt.Println("🔍 Scanning surrounding Wi-Fi networks and scoring quality...")
 	tui.PrintScanTable(aps, currentBSSID)
 }
 
 type OptResult struct {
-	Success    bool              `json:"success"`
-	Switched   bool              `json:"switched"`
-	CurrentSSID string           `json:"current_ssid"`
-	TargetSSID  string           `json:"target_ssid,omitempty"`
-	Band        string           `json:"band,omitempty"`
-	Score       float64          `json:"score,omitempty"`
-	Reason      string           `json:"reason,omitempty"`
-	Error       string           `json:"error,omitempty"`
+	Success     bool    `json:"success"`
+	Switched    bool    `json:"switched"`
+	CurrentSSID string  `json:"current_ssid"`
+	TargetSSID  string  `json:"target_ssid,omitempty"`
+	Band        string  `json:"band,omitempty"`
+	Score       float64 `json:"score,omitempty"`
+	Reason      string  `json:"reason,omitempty"`
+	Error       string  `json:"error,omitempty"`
 }
 
 func runOptimize(asJSON bool) {
@@ -248,8 +243,8 @@ func runOptimize(asJSON bool) {
 	if err := wifi.ConnectSSID(betterAP.SSID); err != nil {
 		if asJSON {
 			res := OptResult{
-				Success:  false,
-				Error:    err.Error(),
+				Success: false,
+				Error:   err.Error(),
 			}
 			data, _ := json.Marshal(res)
 			fmt.Println(string(data))
@@ -353,11 +348,18 @@ func runLogs(asJSON bool) {
 	}
 }
 
-func runConnect(ssid string, asJSON bool) {
+func runConnectWithPassword(ssid, password string, asJSON bool) {
 	if !asJSON {
 		fmt.Printf("Connecting to '%s'...\n", ssid)
 	}
-	if err := wifi.ConnectSSID(ssid); err != nil {
+	var err error
+	if password != "" {
+		err = wifi.ConnectSSIDWithPassword(ssid, password)
+	} else {
+		err = wifi.ConnectSSID(ssid)
+	}
+
+	if err != nil {
 		if asJSON {
 			fmt.Printf(`{"success":false,"error":%q}`+"\n", err.Error())
 		} else {
@@ -381,5 +383,5 @@ func printHelp() {
 	fmt.Println("  nomadwifi optimize [--json] Analyze and auto-switch to the best 5GHz/high-speed hotel AP")
 	fmt.Println("  nomadwifi watch [--dry-run] Run background daemon to actively monitor and auto-roam")
 	fmt.Println("  nomadwifi logs [--json]     Display recent activity logs and log file path")
-	fmt.Println("  nomadwifi connect <SSID>    Connect directly to a specific Wi-Fi network")
+	fmt.Println("  nomadwifi connect <SSID> [--password <pwd>] Connect directly with optional password")
 }

@@ -115,5 +115,20 @@ namespace NomadWiFi.UI.Services
                 return false;
             }
         }
+
+        public async Task<bool> ConnectWithPasswordAsync(string ssid, string password)
+        {
+            try
+            {
+                var escapedPwd = password.Replace("\"", "\\\"");
+                var json = await RunCommandAsync(string.Format("connect \"{0}\" --password \"{1}\" --json", ssid, escapedPwd));
+                return json != null && json.Contains("\"success\":true");
+            }
+            catch
+            {
+                return false;
+            }
+        }
     }
 }
+

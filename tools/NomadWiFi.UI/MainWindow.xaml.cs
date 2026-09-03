@@ -15,6 +15,7 @@ using NomadWiFi.UI.Models;
 using NomadWiFi.UI.Services;
 using Application = System.Windows.Application;
 using Button = System.Windows.Controls.Button;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using Point = System.Windows.Point;
 
 namespace NomadWiFi.UI
@@ -34,6 +35,8 @@ namespace NomadWiFi.UI
         private bool _isAutoRoamEnabled = true;
         private DateTime _lastRoamTime = DateTime.MinValue;
         private string _captivePortalUrl = "http://neverssl.com";
+        private string _pendingModalSsid = "";
+        private List<AccessPoint> _currentAps = new List<AccessPoint>();
         private InterfaceStatus _lastStatus;
 
         public MainWindow() : this(false) { }
@@ -135,7 +138,6 @@ namespace NomadWiFi.UI
                 if (ChkStartup != null) ChkStartup.IsChecked = !cur;
             })) { Checked = StartupManager.IsStartupEnabled() };
             contextMenu.Items.Add(_trayMenuStartup);
-
 
             contextMenu.Items.Add(new ToolStripSeparator());
             contextMenu.Items.Add("❌ Exit Completely", null, (s, e) => ExitApplication());
@@ -263,30 +265,41 @@ namespace NomadWiFi.UI
 
         #endregion
 
-        #region Diagnostics & Real-Time Sparkline Rendering
+        #region Diagnostics & Prominent Offline Handling
 
         private async Task RefreshStatusAsync()
         {
             var status = await _client.GetStatusAsync();
             if (status == null || !status.connected)
             {
-                TxtSsid.Text = "Disconnected";
-                TxtDetails.Text = "No active Wi-Fi connection detected";
-                TxtBand.Text = "Offline";
-                TxtBand.Foreground = (System.Windows.Media.Brush)FindResource("AccentRed");
-                TxtSignal.Text = "-- %";
-                TxtSpeed.Text = "-- Mbps";
-                TxtLatency.Text = "-- ms";
-                TxtJitter.Text = "Jitter: -- ms";
+                // Prominent Offline Status Indicator
+                BorderOfflineBanner.Visibility = Visibility.Visible;
                 BorderCaptivePortal.Visibility = Visibility.Collapsed;
+
+                TxtSsid.Text = "Offline (No Connection)";
+                TxtDetails.Text = "Wireless adapter is disconnected • Select a network below to connect";
+
+                BorderBand.Background = (System.Windows.Media.Brush)new BrushConverter().ConvertFrom("#F8514922");
+                BorderBand.BorderBrush = (System.Windows.Media.Brush)new BrushConverter().ConvertFrom("#F8514944");
+                TxtBand.Text = "🔴 Offline";
+                TxtBand.Foreground = (System.Windows.Media.Brush)FindResource("AccentRed");
+
+                TxtSignal.Text = "0 %";
+                TxtSpeed.Text = "0 Mbps";
+                TxtLatency.Text = "-- ms";
+                TxtJitter.Text = "Disconnected";
                 return;
             }
 
             _lastStatus = status;
+            BorderOfflineBanner.Visibility = Visibility.Collapsed;
+
             TxtSsid.Text = status.ssid;
             TxtDetails.Text = string.Format("{0} • Channel {1} • {2}", status.radio_type, status.channel, status.bssid);
 
             var is5G = status.band != null && (status.band.Contains("5") || status.band.Contains("6"));
+            BorderBand.Background = (System.Windows.Media.Brush)new BrushConverter().ConvertFrom("#10B98122");
+            BorderBand.BorderBrush = (System.Windows.Media.Brush)new BrushConverter().ConvertFrom("#10B98144");
             TxtBand.Text = status.band;
             TxtBand.Foreground = (System.Windows.Media.Brush)FindResource(is5G ? "AccentGreen" : "AccentYellow");
 
@@ -376,6 +389,7 @@ namespace NomadWiFi.UI
             try
             {
                 var aps = await _client.ScanNetworksAsync();
+                _currentAps = aps;
                 ItemsAccessPoints.ItemsSource = aps;
                 TxtApCount.Text = string.Format("{0} APs in range", aps.Count);
             }
@@ -412,7 +426,7 @@ namespace NomadWiFi.UI
             if (!is24GHz && !isWeak && !isHighLoss && !isHighLatency) return;
 
             var aps = await _client.ScanNetworksAsync();
-            var best5G = aps.FirstOrDefault(a => a.Is5GHz && a.CanConnect && a.signal_percent >= 38);
+            var best5G = aps.FirstOrDefault(a => a.Is5GHz && !a.IsLocked && a.signal_percent >= 38);
 
             if (best5G != null && !string.Equals(best5G.ssid, status.ssid, StringComparison.OrdinalIgnoreCase))
             {
@@ -448,7 +462,7 @@ namespace NomadWiFi.UI
 
         #endregion
 
-        #region Actions & Event Handlers
+        #region Actions & Password Modal Handlers
 
         private async void BtnOptimize_Click(object sender, RoutedEventArgs e)
         {
@@ -500,24 +514,86 @@ namespace NomadWiFi.UI
         private async void BtnConnect_Click(object sender, RoutedEventArgs e)
         {
             var btn = sender as Button;
-            if (btn != null)
+            if (btn == null) return;
+
+            var ssid = btn.Tag as string;
+            if (string.IsNullOrEmpty(ssid)) return;
+
+            var ap = _currentAps.FirstOrDefault(a => string.Equals(a.ssid, ssid, StringComparison.OrdinalIgnoreCase));
+            if (ap != null && ap.IsLocked)
             {
-                var ssid = btn.Tag as string;
-                if (!string.IsNullOrEmpty(ssid))
-                {
-                    TxtStatusMsg.Text = string.Format("Connecting to {0}...", ssid);
-                    var success = await _client.ConnectAsync(ssid);
-                    if (success)
-                    {
-                        TxtStatusMsg.Text = string.Format("Connected to {0}!", ssid);
-                        await RefreshStatusAsync();
-                        await RefreshScanAsync();
-                    }
-                    else
-                    {
-                        TxtStatusMsg.Text = string.Format("Failed to connect to {0}.", ssid);
-                    }
-                }
+                // Open Password Input Modal Dialog
+                _pendingModalSsid = ssid;
+                TxtModalSsid.Text = "Network: " + ssid;
+                BoxPassword.Password = "";
+                TxtModalError.Text = "";
+                TxtModalError.Visibility = Visibility.Collapsed;
+                OverlayPasswordModal.Visibility = Visibility.Visible;
+                BoxPassword.Focus();
+                return;
+            }
+
+            // Direct Connect for Saved / Inferred / Open networks
+            TxtStatusMsg.Text = string.Format("Connecting to {0}...", ssid);
+            var success = await _client.ConnectAsync(ssid);
+            if (success)
+            {
+                TxtStatusMsg.Text = string.Format("Connected to {0}!", ssid);
+                await RefreshStatusAsync();
+                await RefreshScanAsync();
+            }
+            else
+            {
+                TxtStatusMsg.Text = string.Format("Failed to connect to {0}.", ssid);
+            }
+        }
+
+        private async void BtnSavePassword_Click(object sender, RoutedEventArgs e)
+        {
+            var pwd = BoxPassword.Password;
+            if (string.IsNullOrEmpty(pwd) || pwd.Length < 8)
+            {
+                TxtModalError.Text = "Wi-Fi password must be at least 8 characters.";
+                TxtModalError.Visibility = Visibility.Visible;
+                return;
+            }
+
+            BtnSavePassword.IsEnabled = false;
+            TxtModalError.Text = "Authenticating and testing password...";
+            TxtModalError.Foreground = (System.Windows.Media.Brush)FindResource("AccentGreen");
+            TxtModalError.Visibility = Visibility.Visible;
+
+            var success = await _client.ConnectWithPasswordAsync(_pendingModalSsid, pwd);
+            BtnSavePassword.IsEnabled = true;
+
+            if (success)
+            {
+                OverlayPasswordModal.Visibility = Visibility.Collapsed;
+                TxtStatusMsg.Text = string.Format("🎉 Connected to {0}! Network is now saved.", _pendingModalSsid);
+                await RefreshStatusAsync();
+                await RefreshScanAsync();
+            }
+            else
+            {
+                TxtModalError.Foreground = (System.Windows.Media.Brush)FindResource("AccentRed");
+                TxtModalError.Text = "Authentication failed: Incorrect password or connection timed out.";
+            }
+        }
+
+        private void BtnCancelPassword_Click(object sender, RoutedEventArgs e)
+        {
+            OverlayPasswordModal.Visibility = Visibility.Collapsed;
+        }
+
+        private void BoxPassword_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                BtnSavePassword_Click(sender, e);
+            }
+            else if (e.Key == Key.Escape)
+            {
+                BtnCancelPassword_Click(sender, e);
             }
         }
 

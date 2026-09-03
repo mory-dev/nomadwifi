@@ -25,7 +25,6 @@ namespace NomadWiFi.UI.Models
         public string captive_portal_url { get; set; }
     }
 
-
     public class AccessPoint
     {
         public string ssid { get; set; }
@@ -61,9 +60,14 @@ namespace NomadWiFi.UI.Models
             get { return string.Format("{0}%", signal_percent); }
         }
 
+        public bool IsLocked
+        {
+            get { return string.Equals(auth_status, "LOCKED", StringComparison.OrdinalIgnoreCase); }
+        }
+
         public bool CanConnect
         {
-            get { return !string.Equals(auth_status, "LOCKED", StringComparison.OrdinalIgnoreCase); }
+            get { return true; } // Always clickable to either connect or input key!
         }
 
         public string AuthBadgeText
@@ -124,12 +128,17 @@ namespace NomadWiFi.UI.Models
 
         public Visibility WarmVisibility
         {
-            get { return is_warm && CanConnect ? Visibility.Visible : Visibility.Collapsed; }
+            get { return is_warm && !IsLocked ? Visibility.Visible : Visibility.Collapsed; }
         }
 
         public string ConnectBtnText
         {
-            get { return CanConnect ? "Connect" : "Locked"; }
+            get { return IsLocked ? "🔑 Enter Key" : "Connect"; }
+        }
+
+        public string ConnectBtnTooltip
+        {
+            get { return IsLocked ? "Click to enter Wi-Fi password for this network" : "Connect to this network"; }
         }
     }
 

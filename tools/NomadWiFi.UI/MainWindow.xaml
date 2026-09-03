@@ -161,12 +161,23 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <!-- 1. Captive Portal Alert Banner (Appears when hotel login page is intercepted) -->
-                <Border x:Name="BorderCaptivePortal" Grid.Row="0" Visibility="Collapsed" Background="#D2992222" BorderBrush="#D29922" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,0,10">
+                <!-- 1. Offline Alert Banner (Prominently shown when disconnected) -->
+                <Border x:Name="BorderOfflineBanner" Grid.Row="0" Visibility="Collapsed" Background="#F8514922" BorderBrush="#F85149" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,0,10">
+                    <Grid>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="🔴" FontSize="15" Margin="0,0,8,0" VerticalAlignment="Center" />
+                            <TextBlock Text="Offline — No active Wi-Fi connection. Select an access point below to connect." FontWeight="SemiBold" Foreground="#F85149" FontSize="12" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- 2. Captive Portal Alert Banner -->
+                <Border x:Name="BorderCaptivePortal" Grid.Row="1" Visibility="Collapsed" Background="#D2992222" BorderBrush="#D29922" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,0,10">
                     <Grid>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="⚠️" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center" />
@@ -176,8 +187,8 @@
                     </Grid>
                 </Border>
 
-                <!-- 2. Roam Upgrade Celebration Banner -->
-                <Border x:Name="BorderRoamCelebration" Grid.Row="0" Visibility="Collapsed" Background="#10B98122" BorderBrush="#10B981" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,0,10">
+                <!-- 3. Roam Upgrade Celebration Banner -->
+                <Border x:Name="BorderRoamCelebration" Grid.Row="1" Visibility="Collapsed" Background="#10B98122" BorderBrush="#10B981" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,0,10">
                     <Grid>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="🎉" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center" />
@@ -188,7 +199,7 @@
                 </Border>
 
                 <!-- Active Hero Connection Card with Real-Time Latency Sparkline -->
-                <Border Grid.Row="1" Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
+                <Border Grid.Row="2" Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -251,7 +262,7 @@
                             </Border>
                         </Grid>
 
-                        <!-- Action Button Row with Rich Explanatory Hover ToolTip -->
+                        <!-- Action Button Row -->
                         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
                             <Button x:Name="BtnOptimize" Content="⚡ Auto-Optimize 5GHz" Style="{StaticResource PrimaryBtn}" Click="BtnOptimize_Click">
                                 <Button.ToolTip>
@@ -271,7 +282,7 @@
                 </Border>
 
                 <!-- Access Points List Card (Expanded Vertical Area) -->
-                <Border Grid.Row="2" Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,10">
+                <Border Grid.Row="3" Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,10">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -298,7 +309,7 @@
                                                     <ColumnDefinition Width="65" />
                                                     <ColumnDefinition Width="65" />
                                                     <ColumnDefinition Width="90" />
-                                                    <ColumnDefinition Width="75" />
+                                                    <ColumnDefinition Width="95" />
                                                 </Grid.ColumnDefinitions>
 
                                                 <!-- SSID & MAC -->
@@ -332,8 +343,8 @@
                                                     <TextBlock Text="{Binding ScoreDisplay}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource AccentGreen}" VerticalAlignment="Center" Margin="5,0,0,0" />
                                                 </StackPanel>
 
-                                                <!-- Connect Button -->
-                                                <Button Grid.Column="6" Content="{Binding ConnectBtnText}" IsEnabled="{Binding CanConnect}" Style="{StaticResource SecondaryBtn}" Padding="8,4" FontSize="11" Click="BtnConnect_Click" Tag="{Binding ssid}" HorizontalAlignment="Right" />
+                                                <!-- Connect / Enter Key Button (Always Clickable) -->
+                                                <Button Grid.Column="6" Content="{Binding ConnectBtnText}" ToolTip="{Binding ConnectBtnTooltip}" Style="{StaticResource SecondaryBtn}" Padding="8,4" FontSize="11" Click="BtnConnect_Click" Tag="{Binding ssid}" HorizontalAlignment="Right" />
                                             </Grid>
                                         </Border>
                                     </DataTemplate>
@@ -343,8 +354,8 @@
                     </Grid>
                 </Border>
 
-                <!-- Footer Card with Autonomous Watchdog & Startup Controls -->
-                <Border Grid.Row="3" Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="10" Padding="14,9">
+                <!-- Footer Card -->
+                <Border Grid.Row="4" Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="10" Padding="14,9">
                     <Grid>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <CheckBox x:Name="ChkAutoRoam" Content="🛡️ Autonomous Auto-Roam Watchdog" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" Margin="0,0,18,0" Click="ChkAutoRoam_Click" ToolTip="Silently monitors signal &amp; latency in the background and auto-switches to 5GHz when needed" />
@@ -352,6 +363,26 @@
                         </StackPanel>
                         <TextBlock Text="NomadWiFi v1.1 • Enterprise" FontSize="11" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                     </Grid>
+                </Border>
+            </Grid>
+
+            <!-- Password Input Modal Overlay -->
+            <Grid x:Name="OverlayPasswordModal" Grid.Row="0" Grid.RowSpan="2" Background="#CC0D1117" Visibility="Collapsed">
+                <Border Background="#161B22" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="12" Padding="24" Width="420" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel>
+                        <TextBlock Text="🔑 Enter Wi-Fi Password" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimary}" />
+                        <TextBlock x:Name="TxtModalSsid" Text="Network: BaanNT_5G" FontSize="12" Foreground="{StaticResource AccentGreen}" FontWeight="SemiBold" Margin="0,4,0,16" />
+
+                        <TextBlock Text="Wi-Fi Password / Security Key:" FontSize="12" Foreground="{StaticResource TextPrimary}" Margin="0,0,0,6" />
+                        <PasswordBox x:Name="BoxPassword" Height="34" FontSize="14" Background="#0D1117" Foreground="#F0F6FC" BorderBrush="#30363D" BorderThickness="1" Padding="8,6" KeyDown="BoxPassword_KeyDown" />
+
+                        <TextBlock x:Name="TxtModalError" Text="" Foreground="{StaticResource AccentRed}" FontSize="11" Margin="0,8,0,0" Visibility="Collapsed" />
+
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+                            <Button Content="Cancel" Style="{StaticResource SecondaryBtn}" Margin="0,0,8,0" Padding="14,6" Click="BtnCancelPassword_Click" />
+                            <Button x:Name="BtnSavePassword" Content="Save &amp; Connect" Style="{StaticResource PrimaryBtn}" Padding="16,6" Click="BtnSavePassword_Click" />
+                        </StackPanel>
+                    </StackPanel>
                 </Border>
             </Grid>
         </Grid>
