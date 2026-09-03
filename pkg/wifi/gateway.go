@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"net"
 	"net/http"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,7 +14,7 @@ import (
 
 // GetDefaultGateway parses the active IPv4 default gateway.
 func GetDefaultGateway() string {
-	cmd := exec.Command("netsh", "interface", "ipv4", "show", "config", "name=Wi-Fi")
+	cmd := SilentCommand("netsh", "interface", "ipv4", "show", "config", "name=Wi-Fi")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -34,13 +34,28 @@ func GetDefaultGateway() string {
 	return ""
 }
 
-// PingGateway pings the default gateway and returns average round-trip ms and packet loss percentage.
+// PingGateway measures gateway round-trip time in milliseconds.
+// Uses fast in-process TCP dial first (0 subprocesses), with silent ping fallback.
 func PingGateway(gwIP string) (avgMs float64, packetLoss float64) {
 	if gwIP == "" {
 		return 0, 100.0
 	}
 
-	cmd := exec.Command("ping", "-n", "3", "-w", "1000", gwIP)
+	// Try ultra-fast native TCP check to gateway DNS (port 53) or HTTP (port 80)
+	ports := []string{"53", "80", "443"}
+	for _, port := range ports {
+		target := net.JoinHostPort(gwIP, port)
+		start := time.Now()
+		conn, err := net.DialTimeout("tcp", target, 600*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			rtt := float64(time.Since(start).Microseconds()) / 1000.0
+			return rtt, 0.0
+		}
+	}
+
+	// Fallback to silent ping (CREATE_NO_WINDOW so zero console windows spawn)
+	cmd := SilentCommand("ping", "-n", "2", "-w", "500", gwIP)
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, 100.0
@@ -68,17 +83,15 @@ func PingGateway(gwIP string) (avgMs float64, packetLoss float64) {
 }
 
 // CheckCaptivePortal probes Google HTTP 204 endpoint.
-// Returns true if captive portal is intercepting HTTP requests.
 func CheckCaptivePortal() bool {
 	client := &http.Client{
-		Timeout: 3 * time.Second,
+		Timeout: 2 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			// If redirect occurs on 204 endpoint, it's definitely a captive portal!
 			return http.ErrUseLastResponse
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://connectivitycheck.gstatic.com/generate_204", nil)
@@ -92,7 +105,5 @@ func CheckCaptivePortal() bool {
 	}
 	defer resp.Body.Close()
 
-	// Google 204 endpoint returns HTTP 204 No Content with 0 bytes when clean.
-	// If it returns HTTP 200, 302, or 307 with HTML body, a captive portal has intercepted it.
 	return resp.StatusCode != http.StatusNoContent
 }

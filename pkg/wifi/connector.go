@@ -13,7 +13,7 @@ import (
 
 // GetInterfaceStatus returns current Wi-Fi adapter connection state and diagnostics.
 func GetInterfaceStatus() (*InterfaceStatus, error) {
-	cmd := exec.Command("netsh", "wlan", "show", "interfaces")
+	cmd := SilentCommand("netsh", "wlan", "show", "interfaces")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -87,7 +87,7 @@ func GetInterfaceStatus() (*InterfaceStatus, error) {
 
 // ConnectSSID initiates connection to a saved or visible Wi-Fi profile.
 func ConnectSSID(ssid string) error {
-	cmd := exec.Command("netsh", "wlan", "connect", fmt.Sprintf("name=%s", ssid))
+	cmd := SilentCommand("netsh", "wlan", "connect", fmt.Sprintf("name=%s", ssid))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("connection failed: %w (output: %s)", err, string(out))
@@ -99,6 +99,7 @@ func ConnectSSID(ssid string) error {
 
 // Disconnect disconnects the active Wi-Fi connection.
 func Disconnect() error {
-	cmd := exec.Command("netsh", "wlan", "disconnect")
+	cmd := SilentCommand("netsh", "wlan", "disconnect")
 	return cmd.Run()
 }
+

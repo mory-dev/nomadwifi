@@ -12,7 +12,7 @@ import (
 
 // ScanNetworks scans all available wireless access points and returns them scored by quality.
 func ScanNetworks() ([]AccessPoint, error) {
-	cmd := exec.Command("netsh", "wlan", "show", "networks", "mode=bssid")
+	cmd := SilentCommand("netsh", "wlan", "show", "networks", "mode=bssid")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -20,6 +20,7 @@ func ScanNetworks() ([]AccessPoint, error) {
 
 	return parseNetshNetworks(out)
 }
+
 
 func parseNetshNetworks(data []byte) ([]AccessPoint, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
