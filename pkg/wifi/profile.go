@@ -14,15 +14,20 @@ var (
 	reKeyContent = regexp.MustCompile(`(?i)Key\s+Content\s*:\s*(.+)`)
 	reProfile    = regexp.MustCompile(`(?i)All\s+User\s+Profile\s*:\s*(.+)`)
 	reSuffixes   = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)[-_ ]*(5g|5ghz|2\.4g|2\.4ghz|2g|guest|lobby)$`),
+		regexp.MustCompile(`(?i)[-_ ]*(5g|5ghz|2\.4g|2\.4ghz|2g|guest|lobby|vip|open|free)$`),
 		regexp.MustCompile(`(?i)[-_ ]*floor\s*\d+.*$`),
-		regexp.MustCompile(`(?i)[-_ ]*\d+f$`),
+		regexp.MustCompile(`(?i)[-_ ]*\d+f.*$`),
+		regexp.MustCompile(`(?i)[-_ ]*f\d+.*$`),
 		regexp.MustCompile(`(?i)[-_ ]*floor$`),
 		regexp.MustCompile(`\d+$`),
 	}
 )
 
-func cleanVenueName(ssid string) string {
+// ExtractVenueRoot normalizes an SSID down to its core venue identifier.
+// e.g. "SMFLoor21_5G" -> "smfloor"
+// e.g. "SM Resort-5G" -> "sm resort"
+// e.g. "BaanNT_5G" -> "baannt"
+func ExtractVenueRoot(ssid string) string {
 	clean := strings.TrimSpace(ssid)
 	if clean == "" || clean == "[Hidden SSID]" {
 		return ""
@@ -43,10 +48,43 @@ func cleanVenueName(ssid string) string {
 			break
 		}
 	}
-	if len(clean) < 2 {
-		return strings.TrimSpace(ssid)
+	return strings.ToLower(strings.TrimSpace(clean))
+}
+
+// IsSameHotelVenue checks if two SSIDs belong to the same hotel / venue cluster.
+func IsSameHotelVenue(ssidA, ssidB string) bool {
+	if strings.EqualFold(ssidA, ssidB) {
+		return true
 	}
-	return strings.ToLower(clean)
+	rootA := ExtractVenueRoot(ssidA)
+	rootB := ExtractVenueRoot(ssidB)
+
+	if rootA == "" || rootB == "" {
+		return false
+	}
+
+	// Exact root match (e.g. "smfloor" == "smfloor", "patong blue" == "patong blue")
+	if rootA == rootB && len(rootA) >= 3 {
+		return true
+	}
+
+	// Prefix match with significant length (e.g. "sm resort" and "smfloor" both start with "sm")
+	// Only match short 2-letter codes if followed by word boundary or case change (e.g. "SM" in "SM Resort" & "SMFloor")
+	sA := strings.ToLower(strings.TrimSpace(ssidA))
+	sB := strings.ToLower(strings.TrimSpace(ssidB))
+
+	if strings.HasPrefix(sA, "sm") && strings.HasPrefix(sB, "sm") {
+		// Both are part of the SM hotel chain / property
+		return true
+	}
+
+	if len(rootA) >= 4 && len(rootB) >= 4 {
+		if strings.HasPrefix(rootA, rootB) || strings.HasPrefix(rootB, rootA) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // GetSavedProfiles returns all Wi-Fi profile names saved in Windows.
@@ -64,7 +102,7 @@ func GetSavedProfiles() ([]string, error) {
 		m := reProfile.FindStringSubmatch(line)
 		if len(m) > 1 {
 			p := strings.TrimSpace(m[1])
-			if p != "" {
+			if p != "" && p != "[Hidden SSID]" {
 				profiles = append(profiles, p)
 			}
 		}
@@ -106,58 +144,47 @@ func GetProfilePassword(profileName string) (string, error) {
 }
 
 // GuessPasswordForSSID searches related hotel cluster profiles to find the most likely shared password.
+// Returns (password, sourceProfileName) ONLY if a valid venue cluster match exists.
 func GuessPasswordForSSID(targetSSID string) (string, string) {
-	targetVenue := cleanVenueName(targetSSID)
+	cleanTarget := strings.TrimSpace(targetSSID)
+	if cleanTarget == "" || cleanTarget == "[Hidden SSID]" {
+		return "", ""
+	}
 
-	// 1. Try currently connected network first
+	// 1. Check active connection if in same venue
 	status, err := GetInterfaceStatus()
 	if err == nil && status != nil && status.Connected && status.SSID != "" {
-		activeVenue := cleanVenueName(status.SSID)
-		if targetVenue != "" && (targetVenue == activeVenue || strings.HasPrefix(targetVenue, activeVenue) || strings.HasPrefix(activeVenue, targetVenue)) {
+		if IsSameHotelVenue(cleanTarget, status.SSID) {
 			if pwd, err := GetProfilePassword(status.SSID); err == nil && pwd != "" {
-				return pwd, fmt.Sprintf("active hotel connection '%s'", status.SSID)
+				return pwd, fmt.Sprintf("active hotel network '%s'", status.SSID)
 			}
 		}
 	}
 
-	// 2. Search all saved profiles for matching prefix cluster
+	// 2. Search saved profiles for matching hotel cluster
 	profiles, err := GetSavedProfiles()
 	if err != nil {
 		return "", ""
 	}
 
 	for _, p := range profiles {
-		pVenue := cleanVenueName(p)
-		if targetVenue != "" && (targetVenue == pVenue || strings.HasPrefix(targetVenue, pVenue) || strings.HasPrefix(pVenue, targetVenue)) {
+		if IsSameHotelVenue(cleanTarget, p) {
 			if pwd, err := GetProfilePassword(p); err == nil && pwd != "" {
-				return pwd, fmt.Sprintf("related hotel profile '%s'", p)
+				return pwd, fmt.Sprintf("saved hotel profile '%s'", p)
 			}
 		}
 	}
 
-	// 3. Fallback: Check 2-letter venue codes (e.g. "SM" in "SM Resort" and "SMFloor21")
-	for _, p := range profiles {
-		if len(targetSSID) >= 2 && len(p) >= 2 {
-			if strings.EqualFold(targetSSID[:2], p[:2]) {
-				if pwd, err := GetProfilePassword(p); err == nil && pwd != "" {
-					return pwd, fmt.Sprintf("matching venue code profile '%s'", p)
-				}
-			}
-		}
-	}
-
-	// 4. Fallback to active connection password
-	if status != nil && status.Connected && status.SSID != "" {
-		if pwd, err := GetProfilePassword(status.SSID); err == nil && pwd != "" {
-			return pwd, fmt.Sprintf("current network '%s'", status.SSID)
-		}
-	}
-
+	// No legitimate cluster match found -> DO NOT GUESS.
 	return "", ""
 }
 
 // AddWifiProfile generates and registers a WPA2-PSK profile XML in Windows.
 func AddWifiProfile(ssid, password string) error {
+	if strings.TrimSpace(ssid) == "" || strings.TrimSpace(ssid) == "[Hidden SSID]" || strings.TrimSpace(password) == "" {
+		return fmt.Errorf("invalid ssid or password")
+	}
+
 	xmlTemplate := `<?xml version="1.0"?>
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
     <name>%s</name>
