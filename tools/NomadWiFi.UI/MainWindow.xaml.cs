@@ -1,13 +1,17 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Controls;
+using System.Windows.Forms;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using NomadWiFi.UI.Models;
 using NomadWiFi.UI.Services;
+using Application = System.Windows.Application;
+using Button = System.Windows.Controls.Button;
 
 namespace NomadWiFi.UI
 {
@@ -15,11 +19,14 @@ namespace NomadWiFi.UI
     {
         private readonly NomadCoreClient _client = new NomadCoreClient();
         private readonly DispatcherTimer _pollTimer = new DispatcherTimer();
+        private NotifyIcon _notifyIcon;
         private bool _isBusy = false;
+        private bool _isExiting = false;
 
         public MainWindow()
         {
             InitializeComponent();
+            SetupSystemTray();
 
             _pollTimer.Interval = TimeSpan.FromSeconds(4);
             _pollTimer.Tick += async (s, e) => await RefreshStatusAsync();
@@ -30,7 +37,98 @@ namespace NomadWiFi.UI
                 await RefreshStatusAsync();
                 await RefreshScanAsync();
             };
+
+            Closing += MainWindow_Closing;
         }
+
+        #region System Tray Integration
+
+        private void SetupSystemTray()
+        {
+            _notifyIcon = new NotifyIcon
+            {
+                Text = "NomadWiFi - Hotel & Travel Wi-Fi Optimizer",
+                Icon = CreateTrayIcon(),
+                Visible = true
+            };
+
+            var contextMenu = new ContextMenuStrip();
+            contextMenu.Items.Add("🧭 Open NomadWiFi", null, (s, e) => RestoreFromTray());
+            contextMenu.Items.Add("⚡ Auto-Optimize 5GHz", null, async (s, e) =>
+            {
+                await _client.OptimizeAsync();
+                await RefreshStatusAsync();
+            });
+            contextMenu.Items.Add(new ToolStripSeparator());
+            contextMenu.Items.Add("❌ Exit Completely", null, (s, e) => ExitApplication());
+
+            _notifyIcon.ContextMenuStrip = contextMenu;
+            _notifyIcon.DoubleClick += (s, e) => RestoreFromTray();
+        }
+
+        private Icon CreateTrayIcon()
+        {
+            using (var bmp = new Bitmap(32, 32))
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.Clear(System.Drawing.Color.Transparent);
+
+                // Draw dark rounded circle background
+                using (var bgBrush = new SolidBrush(System.Drawing.Color.FromArgb(22, 27, 34)))
+                {
+                    g.FillEllipse(bgBrush, 1, 1, 30, 30);
+                }
+
+                // Draw emerald accent Wi-Fi arcs
+                using (var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(16, 185, 129), 2.5f))
+                {
+                    g.DrawArc(pen, 5, 5, 22, 22, 210, 120);
+                    g.DrawArc(pen, 9, 9, 14, 14, 210, 120);
+                }
+
+                // Draw center dot
+                using (var dotBrush = new SolidBrush(System.Drawing.Color.FromArgb(16, 185, 129)))
+                {
+                    g.FillEllipse(dotBrush, 13, 20, 6, 6);
+                }
+
+                return Icon.FromHandle(bmp.GetHicon());
+            }
+        }
+
+        private void RestoreFromTray()
+        {
+            Show();
+            WindowState = WindowState.Normal;
+            Activate();
+        }
+
+        private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            if (!_isExiting)
+            {
+                e.Cancel = true;
+                Hide();
+                if (_notifyIcon != null)
+                {
+                    _notifyIcon.ShowBalloonTip(2000, "NomadWiFi Active", "NomadWiFi is still optimizing Wi-Fi in the background.", ToolTipIcon.Info);
+                }
+            }
+        }
+
+        private void ExitApplication()
+        {
+            _isExiting = true;
+            if (_notifyIcon != null)
+            {
+                _notifyIcon.Visible = false;
+                _notifyIcon.Dispose();
+            }
+            Application.Current.Shutdown();
+        }
+
+        #endregion
 
         #region Custom TitleBar Handlers
 
@@ -75,7 +173,11 @@ namespace NomadWiFi.UI
 
         private void BtnClose_Click(object sender, RoutedEventArgs e)
         {
-            Close();
+            Hide();
+            if (_notifyIcon != null)
+            {
+                _notifyIcon.ShowBalloonTip(2000, "NomadWiFi Active", "NomadWiFi is running in your system tray.", ToolTipIcon.Info);
+            }
         }
 
         #endregion
@@ -90,7 +192,7 @@ namespace NomadWiFi.UI
                 TxtSsid.Text = "Disconnected";
                 TxtDetails.Text = "No active Wi-Fi connection detected";
                 TxtBand.Text = "Offline";
-                TxtBand.Foreground = (Brush)FindResource("AccentRed");
+                TxtBand.Foreground = (System.Windows.Media.Brush)FindResource("AccentRed");
                 TxtSignal.Text = "-- %";
                 TxtSpeed.Text = "-- Mbps";
                 TxtLatency.Text = "-- ms";
@@ -102,7 +204,7 @@ namespace NomadWiFi.UI
 
             var is5G = status.band != null && (status.band.Contains("5") || status.band.Contains("6"));
             TxtBand.Text = status.band;
-            TxtBand.Foreground = (Brush)FindResource(is5G ? "AccentGreen" : "AccentYellow");
+            TxtBand.Foreground = (System.Windows.Media.Brush)FindResource(is5G ? "AccentGreen" : "AccentYellow");
 
             TxtSignal.Text = string.Format("{0}%", status.signal_percent);
             TxtSpeed.Text = string.Format("{0} Mbps", status.rx_mbps);

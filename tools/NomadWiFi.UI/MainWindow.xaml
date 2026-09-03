@@ -38,7 +38,7 @@
                     <Button Content="🔄 Refresh" Style="{StaticResource SecondaryBtn}" WindowChrome.IsHitTestVisibleInChrome="True" Click="BtnRefresh_Click" Padding="10,3" FontSize="11" Margin="0,4,8,4" VerticalAlignment="Center" />
                     <Button Content="—" Style="{StaticResource CaptionBtn}" Click="BtnMinimize_Click" ToolTip="Minimize" />
                     <Button x:Name="BtnMaximize" Content="▢" Style="{StaticResource CaptionBtn}" Click="BtnMaximize_Click" ToolTip="Maximize" />
-                    <Button Content="✕" Style="{StaticResource CloseCaptionBtn}" Click="BtnClose_Click" ToolTip="Close" />
+                    <Button Content="✕" Style="{StaticResource CloseCaptionBtn}" Click="BtnClose_Click" ToolTip="Minimize to System Tray" />
                 </StackPanel>
             </Grid>
 
@@ -93,9 +93,20 @@
                             </Border>
                         </UniformGrid>
 
-                        <!-- Action Button Row -->
+                        <!-- Action Button Row with Rich Explanatory Hover ToolTip -->
                         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,14,0,0">
-                            <Button x:Name="BtnOptimize" Content="⚡ Auto-Optimize 5GHz" Style="{StaticResource PrimaryBtn}" Click="BtnOptimize_Click" />
+                            <Button x:Name="BtnOptimize" Content="⚡ Auto-Optimize 5GHz" Style="{StaticResource PrimaryBtn}" Click="BtnOptimize_Click">
+                                <Button.ToolTip>
+                                    <ToolTip Background="#161B22" BorderBrush="#30363D" BorderThickness="1" Foreground="#F0F6FC" Padding="14,12">
+                                        <StackPanel MaxWidth="320">
+                                            <TextBlock Text="⚡ What does Auto-Optimize do?" FontWeight="Bold" FontSize="13" Foreground="{StaticResource AccentGreen}" Margin="0,0,0,6" />
+                                            <TextBlock Text="• Scans all nearby Wi-Fi access points in your hotel / venue." FontSize="11" Foreground="#C9D1D9" TextWrapping="Wrap" Margin="0,2" />
+                                            <TextBlock Text="• Identifies high-speed 5 GHz &amp; 6 GHz channels with superior signal &amp; cipher." FontSize="11" Foreground="#C9D1D9" TextWrapping="Wrap" Margin="0,2" />
+                                            <TextBlock Text="• Automatically switches you to the fastest access point without password prompts or disconnection." FontSize="11" Foreground="#C9D1D9" TextWrapping="Wrap" Margin="0,2" />
+                                        </StackPanel>
+                                    </ToolTip>
+                                </Button.ToolTip>
+                            </Button>
                             <TextBlock x:Name="TxtStatusMsg" Text="" Foreground="{StaticResource AccentGreen}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="14,0,0,0" FontSize="12" />
                         </StackPanel>
                     </Grid>
