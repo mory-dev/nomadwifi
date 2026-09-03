@@ -1,8 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using NomadWiFi.UI.Models;
@@ -30,6 +31,56 @@ namespace NomadWiFi.UI
                 await RefreshScanAsync();
             };
         }
+
+        #region Custom TitleBar Handlers
+
+        private void TitleBar_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                if (e.ClickCount == 2)
+                {
+                    ToggleMaximize();
+                }
+                else
+                {
+                    DragMove();
+                }
+            }
+        }
+
+        private void BtnMinimize_Click(object sender, RoutedEventArgs e)
+        {
+            WindowState = WindowState.Minimized;
+        }
+
+        private void BtnMaximize_Click(object sender, RoutedEventArgs e)
+        {
+            ToggleMaximize();
+        }
+
+        private void ToggleMaximize()
+        {
+            if (WindowState == WindowState.Maximized)
+            {
+                WindowState = WindowState.Normal;
+                BtnMaximize.Content = "▢";
+            }
+            else
+            {
+                WindowState = WindowState.Maximized;
+                BtnMaximize.Content = "❐";
+            }
+        }
+
+        private void BtnClose_Click(object sender, RoutedEventArgs e)
+        {
+            Close();
+        }
+
+        #endregion
+
+        #region Wi-Fi Diagnostics & Actions
 
         private async Task RefreshStatusAsync()
         {
@@ -145,7 +196,7 @@ namespace NomadWiFi.UI
                 }
             }
         }
+
+        #endregion
     }
 }
-
-
