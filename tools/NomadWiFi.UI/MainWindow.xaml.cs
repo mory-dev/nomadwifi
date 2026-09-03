@@ -28,13 +28,13 @@ namespace NomadWiFi.UI
             InitializeComponent();
             SetupSystemTray();
 
-            // Auto-refresh every 5 seconds ONLY when window is open and in view
+            // Auto-refresh every 5s ONLY when window is visible, not minimized, and active (in foreground view)
             _pollTimer.Interval = TimeSpan.FromSeconds(5);
             _pollTimer.Tick += async (s, e) =>
             {
-                if (!IsVisible || WindowState == WindowState.Minimized)
+                if (!IsVisible || WindowState == WindowState.Minimized || !IsActive)
                 {
-                    return; // 0% CPU overhead when in tray or minimized
+                    return; // 0% CPU & 0 scans when in tray, minimized, or behind other windows
                 }
                 await RefreshStatusAsync();
                 await RefreshScanAsync();
@@ -45,6 +45,16 @@ namespace NomadWiFi.UI
             {
                 await RefreshStatusAsync();
                 await RefreshScanAsync();
+            };
+
+            // When user switches focus back to NomadWiFi (from browser, editor, etc.)
+            Activated += async (s, e) =>
+            {
+                if (IsVisible && WindowState != WindowState.Minimized)
+                {
+                    await RefreshStatusAsync();
+                    await RefreshScanAsync();
+                }
             };
 
             StateChanged += async (s, e) =>
