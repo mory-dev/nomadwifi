@@ -21,3 +21,6 @@ go.work
 .vscode/
 *.swp
 *.swo
+
+# sudonotes ideas
+IDEAS.md

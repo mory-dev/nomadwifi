@@ -16,6 +16,8 @@ var htmlContent string
 
 // Launch opens the native Windows WebView2 desktop GUI window.
 func Launch() error {
+	wifi.InitBackgroundPoller()
+
 	w := webview.NewWithOptions(webview.WebViewOptions{
 		Debug:     false,
 		AutoFocus: true,
@@ -31,15 +33,16 @@ func Launch() error {
 	}
 	defer w.Destroy()
 
-	// Bind Go callbacks to JS
+	// Bind Go callbacks to JS (all non-blocking)
 	_ = w.Bind("getStatus", func() string {
-		status, err := wifi.GetInterfaceStatus()
-		if err != nil {
+		status := wifi.GetCachedStatus()
+		if status == nil {
 			return "{}"
 		}
 		data, _ := json.Marshal(status)
 		return string(data)
 	})
+
 
 	_ = w.Bind("scanNetworks", func() string {
 		aps, err := wifi.ScanNetworks()
