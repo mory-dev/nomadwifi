@@ -9,8 +9,7 @@ import (
 	"strings"
 )
 
-
-// ScanNetworks scans all available wireless access points and returns them scored by quality.
+// ScanNetworks scans all available wireless access points and returns them scored by quality and auth readiness.
 func ScanNetworks() ([]AccessPoint, error) {
 	cmd := SilentCommand("netsh", "wlan", "show", "networks", "mode=bssid")
 	out, err := cmd.Output()
@@ -18,9 +17,50 @@ func ScanNetworks() ([]AccessPoint, error) {
 		return nil, err
 	}
 
-	return parseNetshNetworks(out)
-}
+	aps, err := parseNetshNetworks(out)
+	if err != nil {
+		return nil, err
+	}
 
+	savedProfiles, _ := GetSavedProfiles()
+	savedMap := make(map[string]bool)
+	for _, p := range savedProfiles {
+		savedMap[strings.ToLower(strings.TrimSpace(p))] = true
+	}
+
+	for i := range aps {
+		ssidLower := strings.ToLower(strings.TrimSpace(aps[i].SSID))
+		if strings.EqualFold(aps[i].Authentication, "Open") || strings.EqualFold(aps[i].Cipher, "None") {
+			aps[i].AuthStatus = AuthStatusOpen
+			aps[i].IsWarm = true
+		} else if savedMap[ssidLower] {
+			aps[i].AuthStatus = AuthStatusSaved
+			aps[i].IsWarm = true
+		} else {
+			pwd, source := GuessPasswordForSSID(aps[i].SSID)
+			if pwd != "" {
+				aps[i].AuthStatus = AuthStatusInferred
+				aps[i].InferredFrom = source
+				// Pre-warm profile in Windows hot-standby for zero-latency switching
+				if err := AddWifiProfile(aps[i].SSID, pwd); err == nil {
+					aps[i].IsWarm = true
+				}
+			} else {
+				aps[i].AuthStatus = AuthStatusLocked
+				aps[i].IsWarm = false
+			}
+		}
+		// Recalculate score with accessibility weighting
+		aps[i].QualityScore = CalculateQualityScore(aps[i])
+	}
+
+	// Sort accessible high-quality APs first
+	sort.Slice(aps, func(i, j int) bool {
+		return aps[i].QualityScore > aps[j].QualityScore
+	})
+
+	return aps, nil
+}
 
 func parseNetshNetworks(data []byte) ([]AccessPoint, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -56,7 +96,6 @@ func parseNetshNetworks(data []byte) ([]AccessPoint, error) {
 			Authentication: currentAuth,
 			Cipher:         currentCipher,
 		}
-		ap.QualityScore = CalculateQualityScore(ap)
 		aps = append(aps, ap)
 
 		// Reset BSSID specific fields
@@ -120,15 +159,10 @@ func parseNetshNetworks(data []byte) ([]AccessPoint, error) {
 	}
 	saveAP()
 
-	// Sort by Quality Score descending
-	sort.Slice(aps, func(i, j int) bool {
-		return aps[i].QualityScore > aps[j].QualityScore
-	})
-
 	return aps, nil
 }
 
-// CalculateQualityScore weights band, Wi-Fi standard, signal, and channel cleanliness.
+// CalculateQualityScore weights band, Wi-Fi standard, signal, cipher, and accessibility.
 func CalculateQualityScore(ap AccessPoint) float64 {
 	score := 0.0
 
@@ -151,26 +185,34 @@ func CalculateQualityScore(ap AccessPoint) float64 {
 		score += 5.0
 	}
 
-	// 2. Band weight: 5GHz/6GHz is immune to 2.4GHz hotel microwave/neighbor congestion
+	// 2. Band weight
 	switch ap.Band {
 	case Band6GHz:
 		score += 30.0
 	case Band5GHz:
 		score += 25.0
 	case Band24GHz:
-		// Heavy penalty for 2.4 GHz in hotel environments
 		score -= 10.0
 	}
 
 	// 3. Signal strength contribution (0..40 points)
 	score += float64(ap.SignalPercent) * 0.40
 
-	// 4. Modern cipher bonus (AES CCMP vs old TKIP/WEP)
+	// 4. Modern cipher bonus
 	cipher := strings.ToUpper(ap.Cipher)
 	if strings.Contains(cipher, "CCMP") || strings.Contains(cipher, "AES") || strings.Contains(cipher, "GCMP") {
 		score += 5.0
 	} else if strings.Contains(cipher, "TKIP") || strings.Contains(cipher, "WEP") {
 		score -= 20.0
+	}
+
+	// 5. Accessibility & Pre-warm Bonus
+	if ap.AuthStatus == AuthStatusSaved {
+		score += 15.0
+	} else if ap.AuthStatus == AuthStatusInferred {
+		score += 10.0
+	} else if ap.AuthStatus == AuthStatusLocked {
+		score -= 50.0 // Heavy penalty for locked unknown networks
 	}
 
 	return score

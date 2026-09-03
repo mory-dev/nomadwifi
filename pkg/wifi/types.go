@@ -12,19 +12,32 @@ const (
 	BandOther Band = "Unknown"
 )
 
+// AuthStatus defines the connection readiness and security state of an access point.
+type AuthStatus string
+
+const (
+	AuthStatusSaved    AuthStatus = "SAVED"    // Existing saved profile with verified password
+	AuthStatusInferred AuthStatus = "INFERRED" // Hotel/venue cluster match with inferred shared password
+	AuthStatusOpen     AuthStatus = "OPEN"     // Unencrypted open network
+	AuthStatusLocked   AuthStatus = "LOCKED"   // Encrypted network with no known or inferred password
+)
+
 // AccessPoint describes a discovered wireless access point / BSSID.
 type AccessPoint struct {
-	SSID           string   `json:"ssid"`
-	BSSID          string   `json:"bssid"`
-	SignalPercent  int      `json:"signal_percent"`
-	RSSI           int      `json:"rssi"`
-	Band           Band     `json:"band"`
-	Channel        int      `json:"channel"`
-	RadioType      string   `json:"radio_type"` // 802.11ax, 802.11ac, 802.11n, etc.
-	Authentication string   `json:"authentication"`
-	Cipher         string   `json:"cipher"`
-	QualityScore   float64  `json:"quality_score"`
-	Reasons        []string `json:"reasons,omitempty"`
+	SSID           string     `json:"ssid"`
+	BSSID          string     `json:"bssid"`
+	SignalPercent  int        `json:"signal_percent"`
+	RSSI           int        `json:"rssi"`
+	Band           Band       `json:"band"`
+	Channel        int        `json:"channel"`
+	RadioType      string     `json:"radio_type"` // 802.11ax, 802.11ac, 802.11n, etc.
+	Authentication string     `json:"authentication"`
+	Cipher         string     `json:"cipher"`
+	QualityScore   float64    `json:"quality_score"`
+	AuthStatus     AuthStatus `json:"auth_status"`
+	InferredFrom   string     `json:"inferred_from,omitempty"`
+	IsWarm         bool       `json:"is_warm"`
+	Reasons        []string   `json:"reasons,omitempty"`
 }
 
 // InterfaceStatus holds active network adapter details and link metrics.
@@ -47,6 +60,6 @@ type InterfaceStatus struct {
 }
 
 func (ap AccessPoint) String() string {
-	return fmt.Sprintf("%-20s | %-6s | Ch %-3d | %-8s | %3d%% (Score: %.1f)",
-		ap.SSID, ap.Band, ap.Channel, ap.RadioType, ap.SignalPercent, ap.QualityScore)
+	return fmt.Sprintf("%-20s | %-6s | Ch %-3d | %-8s | %3d%% (Score: %.1f, Status: %s, Warm: %v)",
+		ap.SSID, ap.Band, ap.Channel, ap.RadioType, ap.SignalPercent, ap.QualityScore, ap.AuthStatus, ap.IsWarm)
 }

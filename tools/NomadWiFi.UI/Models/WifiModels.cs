@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Windows;
+using System.Windows.Media;
 
 namespace NomadWiFi.UI.Models
 {
@@ -33,6 +35,9 @@ namespace NomadWiFi.UI.Models
         public string authentication { get; set; }
         public string cipher { get; set; }
         public double quality_score { get; set; }
+        public string auth_status { get; set; }
+        public string inferred_from { get; set; }
+        public bool is_warm { get; set; }
 
         public bool Is5GHz
         {
@@ -52,6 +57,77 @@ namespace NomadWiFi.UI.Models
         public string SignalDisplay
         {
             get { return string.Format("{0}%", signal_percent); }
+        }
+
+        public bool CanConnect
+        {
+            get { return !string.Equals(auth_status, "LOCKED", StringComparison.OrdinalIgnoreCase); }
+        }
+
+        public string AuthBadgeText
+        {
+            get
+            {
+                if (string.Equals(auth_status, "SAVED", StringComparison.OrdinalIgnoreCase))
+                    return "🟢 Ready";
+                if (string.Equals(auth_status, "INFERRED", StringComparison.OrdinalIgnoreCase))
+                    return "🟣 Hotel Key";
+                if (string.Equals(auth_status, "OPEN", StringComparison.OrdinalIgnoreCase))
+                    return "🔵 Open";
+                return "🔒 Password Req.";
+            }
+        }
+
+        public Brush AuthBadgeBrush
+        {
+            get
+            {
+                if (string.Equals(auth_status, "SAVED", StringComparison.OrdinalIgnoreCase))
+                    return (Brush)new BrushConverter().ConvertFrom("#10B98122");
+                if (string.Equals(auth_status, "INFERRED", StringComparison.OrdinalIgnoreCase))
+                    return (Brush)new BrushConverter().ConvertFrom("#8B5CF622");
+                if (string.Equals(auth_status, "OPEN", StringComparison.OrdinalIgnoreCase))
+                    return (Brush)new BrushConverter().ConvertFrom("#3B82F622");
+                return (Brush)new BrushConverter().ConvertFrom("#28334444");
+            }
+        }
+
+        public Brush AuthBadgeBorderBrush
+        {
+            get
+            {
+                if (string.Equals(auth_status, "SAVED", StringComparison.OrdinalIgnoreCase))
+                    return (Brush)new BrushConverter().ConvertFrom("#10B981");
+                if (string.Equals(auth_status, "INFERRED", StringComparison.OrdinalIgnoreCase))
+                    return (Brush)new BrushConverter().ConvertFrom("#8B5CF6");
+                if (string.Equals(auth_status, "OPEN", StringComparison.OrdinalIgnoreCase))
+                    return (Brush)new BrushConverter().ConvertFrom("#3B82F6");
+                return (Brush)new BrushConverter().ConvertFrom("#4B5563");
+            }
+        }
+
+        public Brush AuthBadgeTextBrush
+        {
+            get
+            {
+                if (string.Equals(auth_status, "SAVED", StringComparison.OrdinalIgnoreCase))
+                    return (Brush)new BrushConverter().ConvertFrom("#10B981");
+                if (string.Equals(auth_status, "INFERRED", StringComparison.OrdinalIgnoreCase))
+                    return (Brush)new BrushConverter().ConvertFrom("#C084FC");
+                if (string.Equals(auth_status, "OPEN", StringComparison.OrdinalIgnoreCase))
+                    return (Brush)new BrushConverter().ConvertFrom("#60A5FA");
+                return (Brush)new BrushConverter().ConvertFrom("#9CA3AF");
+            }
+        }
+
+        public Visibility WarmVisibility
+        {
+            get { return is_warm && CanConnect ? Visibility.Visible : Visibility.Collapsed; }
+        }
+
+        public string ConnectBtnText
+        {
+            get { return CanConnect ? "Connect" : "Locked"; }
         }
     }
 

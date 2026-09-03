@@ -75,11 +75,11 @@ func PrintStatus(status *wifi.InterfaceStatus) {
 	fmt.Println()
 }
 
-// PrintScanTable outputs the ranked list of discovered access points.
+// PrintScanTable outputs the ranked list of discovered access points with auth and pre-warm indicators.
 func PrintScanTable(aps []wifi.AccessPoint, currentBSSID string) {
-	fmt.Printf("%s%-22s | %-7s | %-4s | %-8s | %-7s | %-7s | %s%s\n",
-		ColorBold, "SSID", "Band", "Ch", "Radio", "Signal", "Score", "Rating", ColorReset)
-	fmt.Println(strings.Repeat("-", 80))
+	fmt.Printf("%s%-20s | %-7s | %-3s | %-8s | %-6s | %-5s | %-18s%s\n",
+		ColorBold, "SSID", "Band", "Ch", "Radio", "Signal", "Score", "Auth / Hot-Standby", ColorReset)
+	fmt.Println(strings.Repeat("-", 85))
 
 	for _, ap := range aps {
 		marker := "  "
@@ -92,28 +92,32 @@ func PrintScanTable(aps []wifi.AccessPoint, currentBSSID string) {
 			bandCol = ColorYellow
 		}
 
-		rating := "Good"
-		ratingCol := ColorGreen
-		if ap.QualityScore >= 80 {
-			rating = "Optimal"
-			ratingCol = ColorBold + ColorGreen
-		} else if ap.QualityScore < 50 {
-			rating = "Slow/Crowded"
-			ratingCol = ColorYellow
-		} else if ap.QualityScore < 30 {
-			rating = "Poor"
-			ratingCol = ColorRed
+		authCol := ColorGreen
+		authStr := "Saved (Ready)"
+		switch ap.AuthStatus {
+		case wifi.AuthStatusSaved:
+			authCol = ColorBold + ColorGreen
+			authStr = "🟢 Saved (Hot)"
+		case wifi.AuthStatusInferred:
+			authCol = ColorBold + ColorPurple
+			authStr = "🟣 Hotel Key (Warmed)"
+		case wifi.AuthStatusOpen:
+			authCol = ColorBold + ColorBlue
+			authStr = "🔵 Open Network"
+		case wifi.AuthStatusLocked:
+			authCol = ColorRed
+			authStr = "🔒 Password Required"
 		}
 
 		ssidDisplay := ap.SSID
-		if len(ssidDisplay) > 20 {
-			ssidDisplay = ssidDisplay[:17] + "..."
+		if len(ssidDisplay) > 18 {
+			ssidDisplay = ssidDisplay[:15] + "..."
 		}
 
-		fmt.Printf("%s%-20s | %s%-7s%s | %-4d | %-8s | %3d%%    | %-7.1f | %s%s%s\n",
+		fmt.Printf("%s%-18s | %s%-7s%s | %-3d | %-8s | %3d%%  | %-5.1f | %s%s%s\n",
 			marker, ssidDisplay, bandCol, ap.Band, ColorReset,
 			ap.Channel, ap.RadioType, ap.SignalPercent, ap.QualityScore,
-			ratingCol, rating, ColorReset)
+			authCol, authStr, ColorReset)
 	}
 	fmt.Println()
 }
