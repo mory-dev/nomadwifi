@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -23,12 +22,10 @@ func main() {
 		return
 	}
 
-	tui.PrintBanner()
-
 	command := strings.ToLower(os.Args[1])
 	switch command {
 	case "status":
-		runStatus()
+		runStatus(true)
 	case "scan":
 		runScan()
 	case "optimize", "opt":
@@ -52,61 +49,68 @@ func main() {
 }
 
 func runInteractiveMenu() {
-	reader := bufio.NewReader(os.Stdin)
-
 	for {
+		tui.ClearScreen()
 		tui.PrintBanner()
+
 		status, err := wifi.GetInterfaceStatus()
 		if err == nil && status != nil {
 			tui.PrintStatus(status)
 		}
 
-		fmt.Println("Select an option:")
-		fmt.Println("  [1] Refresh Status")
-		fmt.Println("  [2] Scan All Nearby Wi-Fi Networks")
-		fmt.Println("  [3] One-Click Auto-Optimize (Switch to fastest 5GHz AP)")
-		fmt.Println("  [4] Start Background Auto-Roam Watcher")
-		fmt.Println("  [5] View Logs")
-		fmt.Println("  [6] Exit")
-		fmt.Print("\nEnter choice (1-6): ")
+		fmt.Println("Select an option (Press key):")
+		fmt.Printf("  %s[1]%s Refresh Status                 %s[R]%s\n", tui.ColorBold+tui.ColorCyan, tui.ColorReset, tui.ColorBold+tui.ColorCyan, tui.ColorReset)
+		fmt.Printf("  %s[2]%s Scan All Nearby Networks       %s[S]%s\n", tui.ColorBold+tui.ColorCyan, tui.ColorReset, tui.ColorBold+tui.ColorCyan, tui.ColorReset)
+		fmt.Printf("  %s[3]%s One-Click Auto-Optimize (5GHz) %s[O]%s\n", tui.ColorBold+tui.ColorGreen, tui.ColorReset, tui.ColorBold+tui.ColorGreen, tui.ColorReset)
+		fmt.Printf("  %s[4]%s Auto-Roam Watcher Daemon       %s[W]%s\n", tui.ColorBold+tui.ColorCyan, tui.ColorReset, tui.ColorBold+tui.ColorCyan, tui.ColorReset)
+		fmt.Printf("  %s[5]%s View Roam Logs                 %s[L]%s\n", tui.ColorBold+tui.ColorCyan, tui.ColorReset, tui.ColorBold+tui.ColorCyan, tui.ColorReset)
+		fmt.Printf("  %s[6]%s Exit                           %s[Q]%s\n", tui.ColorBold+tui.ColorRed, tui.ColorReset, tui.ColorBold+tui.ColorRed, tui.ColorReset)
+		fmt.Print("\nChoice > ")
 
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			break
-		}
-		choice := strings.TrimSpace(input)
+		key := tui.ReadKey()
+		choice := strings.ToLower(string(key))
 
 		switch choice {
-		case "1":
+		case "1", "r":
+			// Refreshes loop immediately
 			continue
-		case "2":
+		case "2", "s":
+			tui.ClearScreen()
+			tui.PrintBanner()
 			runScan()
-			pausePrompt(reader)
-		case "3":
+			pauseKey()
+		case "3", "o":
+			tui.ClearScreen()
+			tui.PrintBanner()
 			runOptimize()
-			pausePrompt(reader)
-		case "4":
+			pauseKey()
+		case "4", "w":
+			tui.ClearScreen()
+			tui.PrintBanner()
 			runDaemon()
-			pausePrompt(reader)
-		case "5":
+			pauseKey()
+		case "5", "l":
+			tui.ClearScreen()
+			tui.PrintBanner()
 			runLogs()
-			pausePrompt(reader)
-		case "6", "q", "exit":
+			pauseKey()
+		case "6", "q", "\x03", "\x1b": // 6, q, Ctrl+C, Esc
+			tui.ClearScreen()
 			fmt.Println("Exiting NomadWiFi.")
 			return
-		default:
-			fmt.Println("Invalid selection.")
-			time.Sleep(1 * time.Second)
 		}
 	}
 }
 
-func pausePrompt(reader *bufio.Reader) {
-	fmt.Print("\nPress Enter to return to menu...")
-	_, _ = reader.ReadString('\n')
+func pauseKey() {
+	fmt.Printf("\n%sPress any key to return to menu...%s", tui.ColorYellow, tui.ColorReset)
+	_ = tui.ReadKey()
 }
 
-func runStatus() {
+func runStatus(printBanner bool) {
+	if printBanner {
+		tui.PrintBanner()
+	}
 	status, err := wifi.GetInterfaceStatus()
 	if err != nil {
 		fmt.Printf("Error querying Wi-Fi interface: %v\n", err)
@@ -246,8 +250,9 @@ func runConnect(ssid string) {
 }
 
 func printHelp() {
+	tui.PrintBanner()
 	fmt.Println("Available Commands:")
-	fmt.Println("  nomadwifi                   Open interactive terminal menu (safe for double-click)")
+	fmt.Println("  nomadwifi                   Open interactive terminal menu (instant keypress)")
 	fmt.Println("  nomadwifi status            Show active link stats, band, gateway latency & captive portal")
 	fmt.Println("  nomadwifi scan              Scan all surrounding APs and list them ranked by quality score")
 	fmt.Println("  nomadwifi optimize          Analyze and auto-switch to the best 5GHz/high-speed hotel AP")
