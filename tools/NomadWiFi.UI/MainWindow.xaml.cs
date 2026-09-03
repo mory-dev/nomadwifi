@@ -119,22 +119,23 @@ namespace NomadWiFi.UI
                 await RefreshStatusAsync();
             });
 
-            _trayMenuAutoRoam = new ToolStripMenuItem("🛡️ Autonomous Auto-Roam", null, (s, e) =>
+            _trayMenuAutoRoam = new ToolStripMenuItem("🛡️ Autonomous Auto-Roam", null, new EventHandler((s, e) =>
             {
                 _isAutoRoamEnabled = !_isAutoRoamEnabled;
                 _trayMenuAutoRoam.Checked = _isAutoRoamEnabled;
-                ChkAutoRoam.IsChecked = _isAutoRoamEnabled;
-            }) { Checked = _isAutoRoamEnabled };
+                if (ChkAutoRoam != null) ChkAutoRoam.IsChecked = _isAutoRoamEnabled;
+            })) { Checked = _isAutoRoamEnabled };
             contextMenu.Items.Add(_trayMenuAutoRoam);
 
-            _trayMenuStartup = new ToolStripMenuItem("🚀 Start with Windows", null, (s, e) =>
+            _trayMenuStartup = new ToolStripMenuItem("🚀 Start with Windows", null, new EventHandler((s, e) =>
             {
                 var cur = StartupManager.IsStartupEnabled();
                 StartupManager.SetStartup(!cur);
                 _trayMenuStartup.Checked = !cur;
-                ChkStartup.IsChecked = !cur;
-            }) { Checked = StartupManager.IsStartupEnabled() };
+                if (ChkStartup != null) ChkStartup.IsChecked = !cur;
+            })) { Checked = StartupManager.IsStartupEnabled() };
             contextMenu.Items.Add(_trayMenuStartup);
+
 
             contextMenu.Items.Add(new ToolStripSeparator());
             contextMenu.Items.Add("❌ Exit Completely", null, (s, e) => ExitApplication());
