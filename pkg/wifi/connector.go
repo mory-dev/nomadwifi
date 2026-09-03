@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
+
 
 // GetInterfaceStatus returns current Wi-Fi adapter connection state and diagnostics.
 func GetInterfaceStatus() (*InterfaceStatus, error) {

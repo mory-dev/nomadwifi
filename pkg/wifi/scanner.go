@@ -3,12 +3,12 @@ package wifi
 import (
 	"bufio"
 	"bytes"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 )
+
 
 // ScanNetworks scans all available wireless access points and returns them scored by quality.
 func ScanNetworks() ([]AccessPoint, error) {
