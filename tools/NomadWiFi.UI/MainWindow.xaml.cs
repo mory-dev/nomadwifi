@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -93,9 +93,11 @@ namespace NomadWiFi.UI
                     g.FillEllipse(dotBrush, 13, 20, 6, 6);
                 }
 
-                return Icon.FromHandle(bmp.GetHicon());
+                return System.Drawing.Icon.FromHandle(bmp.GetHicon());
             }
         }
+
+
 
         private void RestoreFromTray()
         {
