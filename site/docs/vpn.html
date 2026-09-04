@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wi-Fi and VPN on Windows — why switching networks breaks, and the fix</title>
+<meta name="description" content="Why connecting to Wi-Fi while a VPN is active leaves you with no internet until you toggle the tunnel off and on, why hotel captive portals never load through a VPN, and how NomadWiFi holds, verifies and resumes the tunnel around a network switch.">
+<link rel="canonical" href="https://nomadwifi.mory.dev/docs/vpn">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="NomadWiFi">
+<meta property="og:url" content="https://nomadwifi.mory.dev/docs/vpn">
+<meta property="og:title" content="Wi-Fi and VPN on Windows — why switching networks breaks">
+<meta property="og:description" content="The default route, stale DNS and captive portals behind a tunnel — and how NomadWiFi automates the off-and-on-again dance.">
+<meta property="og:image" content="https://nomadwifi.mory.dev/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/assets/favicon.ico" sizes="any">
+<link rel="stylesheet" href="/assets/styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Wi-Fi and VPN on Windows: why switching networks breaks, and the fix",
+  "description": "Why joining Wi-Fi with an active VPN leaves you without internet until the tunnel is toggled, why captive portals cannot load through a tunnel, and how NomadWiFi holds and resumes the tunnel around a roam.",
+  "url": "https://nomadwifi.mory.dev/docs/vpn",
+  "image": "https://nomadwifi.mory.dev/assets/og.png",
+  "isPartOf": { "@type": "WebSite", "name": "NomadWiFi", "url": "https://nomadwifi.mory.dev/" }
+}
+</script>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/assets/logo-512.png" alt=""><span class="wordmark">Nomad<span>WiFi</span></span></a>
+    <nav>
+      <a href="/docs">Docs</a>
+      <a href="/docs/cli">CLI</a>
+      <a href="/docs/gui">Desktop app</a>
+      <a href="/docs/vpn" aria-current="page">VPN</a>
+      <a href="https://github.com/dariomory/nomadwifi">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap docs">
+  <aside>
+    <h4>Documentation</h4>
+    <a href="/docs">Overview</a>
+    <a href="/docs/gui">Desktop app</a>
+    <a href="/docs/cli">Command line</a>
+    <a href="/docs/vpn" aria-current="page">VPN &amp; captive portals</a>
+    <h4 style="margin-top:22px">On this page</h4>
+    <a href="#problem">Why it breaks</a>
+    <a href="#choreography">What NomadWiFi does</a>
+    <a href="#clients">Which clients</a>
+    <a href="#portals">Captive portals</a>
+    <a href="#measurement">Honest measurements</a>
+    <a href="#opt-out">Opting out</a>
+  </aside>
+
+  <div>
+    <h1>Wi-Fi and VPN, on speaking terms</h1>
+    <p class="lede">
+      Everyone who works from hotels knows the ritual: join the Wi-Fi, get nothing, turn the VPN off,
+      it connects, turn the VPN back on. NomadWiFi does that for you &mdash; at the right moment, and
+      only when it is needed.
+    </p>
+
+    <h2 id="problem">Why it breaks in the first place</h2>
+    <p>
+      A VPN tunnel installs a default route of its own and points your DNS at the tunnel's resolver.
+      That is the whole point of it. But it means the tunnel keeps owning where your packets go while
+      the network underneath it changes, and three things go wrong at once.
+    </p>
+
+    <h3>The default route survives a network that did not</h3>
+    <p>
+      You associate with a new access point and get a new gateway, but traffic is still being handed
+      to a tunnel whose remote endpoint is no longer reachable over that path. Nothing is obviously
+      broken &mdash; Windows shows a connected network, the tunnel shows connected &mdash; and
+      nothing works.
+    </p>
+
+    <h3>DNS answers from the old network are still cached</h3>
+    <p>
+      The resolver cache does not know the network changed. Even after the route recovers, names
+      keep resolving to answers that belonged to the previous network until the entries age out.
+    </p>
+
+    <h3>A captive portal cannot be reached through a tunnel</h3>
+    <p>
+      Hotel and airport networks intercept your first request and redirect it to a sign-in page. If
+      every packet is going into a tunnel, there is no first request to intercept. The portal never
+      appears; with a kill switch on, you get silence instead of an explanation.
+    </p>
+
+    <div class="note">
+      Toggling the VPN off and on works because it tears down the route and DNS state and rebuilds
+      them against the network you are actually on now. That is the correct fix &mdash; it is just
+      manual, and it has to happen in the right order.
+    </div>
+
+    <h2 id="choreography">What NomadWiFi does around a switch</h2>
+    <ol style="color:var(--muted);max-width:70ch;line-height:1.9">
+      <li><strong>Hold.</strong> Before touching Wi-Fi, the tunnel is paused if it can be paused, so
+          the switch happens over the real network.</li>
+      <li><strong>Switch.</strong> Connect to the chosen access point and wait for association.</li>
+      <li><strong>Verify.</strong> Check the gateway answers, then that the internet is genuinely
+          reachable, then whether a sign-in page is in the way.</li>
+      <li><strong>Roll back if it failed.</strong> If the new access point does not carry traffic
+          within the deadline, the previous network is restored and the failed one is penalised.</li>
+      <li><strong>Resume and repair.</strong> Bring the tunnel back, flush the DNS resolver cache,
+          refresh the route metrics, and probe once more to confirm.</li>
+    </ol>
+    <p>
+      Step five happens <em>whether or not</em> the tunnel could be paused. Flushing DNS and
+      refreshing routes needs no cooperation from the VPN client, and it is most of what the manual
+      off-and-on-again actually achieves.
+    </p>
+
+    <h2 id="clients">Which clients can be controlled</h2>
+    <p>
+      NomadWiFi identifies tunnels by their network adapter, which works without elevation and
+      without assuming any particular client is installed. Detected today: NordVPN (both NordLynx and
+      OpenVPN adapters), Tailscale, WireGuard and Wintun tunnels, OpenVPN and TAP adapters, Mullvad,
+      Proton VPN, ExpressVPN, Surfshark, Cloudflare WARP, ZeroTier, and Windows' own VPN via WAN
+      Miniport.
+    </p>
+    <p>Being able to <em>see</em> a tunnel and being able to <em>pause</em> it are different things.</p>
+
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Client</th><th>Control</th><th>How</th></tr></thead>
+        <tbody>
+          <tr><td>Tailscale</td><td>Full</td><td>Its own command line, no elevation.</td></tr>
+          <tr><td>WireGuard</td><td>Full</td><td><code>wireguard.exe /deactivate</code> on the tunnel.</td></tr>
+          <tr><td>NordVPN</td><td>None on Windows</td><td>The Windows client ships no supported command line. NomadWiFi says so plainly and offers the adapter route below.</td></tr>
+          <tr><td>Anything else</td><td>With administrator rights</td><td>Disabling and re-enabling the tunnel adapter. Offered as one explicit action with one prompt, never attempted silently.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note warn">
+      <strong>When a tunnel cannot be paused, NomadWiFi tells you rather than failing quietly.</strong>
+      The card reads <em>&ldquo;This client has no command line on Windows. Run NomadWiFi as
+      administrator to let it pause the tunnel for you, or toggle the VPN yourself when
+      prompted.&rdquo;</em> Everything else &mdash; the roam, the verification, the rollback, the DNS
+      flush &mdash; still happens.
+    </div>
+
+    <h2 id="portals">Captive portals with a tunnel up</h2>
+    <p>
+      When a portal is detected while a tunnel is up, guessing is not useful: the page cannot load
+      and no amount of retrying changes that. NomadWiFi offers <strong>Pause VPN and sign in</strong>,
+      which holds the tunnel, opens the portal, waits for you to get through, and then resumes and
+      repairs. If it cannot pause your client, it gives you the sequence with the reason, so you are
+      not guessing either.
+    </p>
+    <p>From the terminal:</p>
+<pre><code><span class="tok-c">$</span> nomadwifi vpn hold      <span class="tok-c"># pause the tunnel</span>
+<span class="tok-c">$</span> nomadwifi status        <span class="tok-c"># shows the portal URL to open</span>
+<span class="tok-c">$</span> nomadwifi vpn resume    <span class="tok-c"># bring it back and flush DNS</span></code></pre>
+    <p>
+      A portal is never treated as a degraded link. Roaming away from a network you have not signed
+      in to yet only loses your place.
+    </p>
+
+    <h2 id="measurement">Why the health numbers stay honest</h2>
+    <p>
+      Latency measured through a tunnel is the tunnel's latency, not the Wi-Fi's &mdash; and roaming
+      on that number would mean switching access points because a VPN exit node in another country
+      was slow. NomadWiFi binds its probes to the Wi-Fi adapter's own source address, so what it
+      measures is the link you are actually deciding about. Gateway latency reads the same with the
+      tunnel up or down.
+    </p>
+
+    <h2 id="opt-out">If you would rather it left the tunnel alone</h2>
+<pre><code><span class="tok-c">$</span> nomadwifi watch --no-vpn
+<span class="tok-c">$</span> nomadwifi optimize --no-vpn</code></pre>
+    <p>
+      Roaming, verification and rollback all still work; only the hold and resume steps are skipped.
+      The DNS flush and route refresh still run, because those help regardless.
+    </p>
+  </div>
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    <span>NomadWiFi 1.2.0 &middot; MIT licensed</span>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/docs">Docs</a>
+      <a href="/docs/cli">CLI</a>
+      <a href="https://github.com/dariomory/nomadwifi">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NomadWiFi desktop app — auto-roam, tray states and captive portals</title>
+<meta name="description" content="Guide to the NomadWiFi Windows desktop app: reading the connection card, the network list, automatic roaming, tray icon states, starting with Windows, and signing in to captive portals.">
+<link rel="canonical" href="https://nomadwifi.mory.dev/docs/gui">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="NomadWiFi">
+<meta property="og:url" content="https://nomadwifi.mory.dev/docs/gui">
+<meta property="og:title" content="NomadWiFi desktop app">
+<meta property="og:description" content="The window, the tray, automatic roaming, and captive portal sign-in.">
+<meta property="og:image" content="https://nomadwifi.mory.dev/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/assets/favicon.ico" sizes="any">
+<link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/assets/logo-512.png" alt=""><span class="wordmark">Nomad<span>WiFi</span></span></a>
+    <nav>
+      <a href="/docs">Docs</a>
+      <a href="/docs/cli">CLI</a>
+      <a href="/docs/gui" aria-current="page">Desktop app</a>
+      <a href="/docs/vpn">VPN</a>
+      <a href="https://github.com/dariomory/nomadwifi">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap docs">
+  <aside>
+    <h4>Documentation</h4>
+    <a href="/docs">Overview</a>
+    <a href="/docs/gui" aria-current="page">Desktop app</a>
+    <a href="/docs/cli">Command line</a>
+    <a href="/docs/vpn">VPN &amp; captive portals</a>
+    <h4 style="margin-top:22px">On this page</h4>
+    <a href="#window">The window</a>
+    <a href="#list">Networks in range</a>
+    <a href="#autoroam">Automatic roaming</a>
+    <a href="#tray">Tray states</a>
+    <a href="#startup">Start with Windows</a>
+    <a href="#portal">Captive portals</a>
+    <a href="#layout">How it is packaged</a>
+  </aside>
+
+  <div>
+    <h1>The desktop app</h1>
+    <p class="lede">
+      A single window that tells you what your connection is actually doing, and a background engine
+      that fixes it when it goes wrong.
+    </p>
+
+    <figure class="shot">
+      <img src="/assets/screenshots/gui-main.png" width="1350" height="1044"
+           alt="The NomadWiFi window: the connection card with signal, link speed and a latency graph, a VPN card, the ranked list of networks in range, and the footer with the auto-roam toggle.">
+    </figure>
+
+    <h2 id="window">The window</h2>
+    <p>Three cards, top to bottom.</p>
+
+    <h3>Connection</h3>
+    <p>
+      The network you are on, its access point, band, channel and 802.11 standard, then three live
+      measurements: signal (percentage and the dBm it came from), negotiated link speed, and gateway
+      latency with a rolling graph and jitter. <strong>Switch to the best access point</strong> runs
+      one roam immediately &mdash; the same thing <code>nomadwifi optimize</code> does.
+    </p>
+
+    <h3>VPN</h3>
+    <p>
+      Which tunnel is up, whether it carries all your traffic, and whether NomadWiFi can pause it for
+      you. When a client offers no way to be controlled the card says so and tells you what to do
+      instead, rather than pretending. See <a href="/docs/vpn">VPN &amp; captive portals</a>.
+    </p>
+
+    <h3>Networks in range</h3>
+    <p>Every network the adapter can see, best first.</p>
+
+    <h2 id="list">Reading a row</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Column</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>Name</td><td>The SSID, with its access point address underneath. <code>2 radios</code> means several access points share this name and NomadWiFi will pick between them.</td></tr>
+          <tr><td><em>prepared by NomadWiFi</em></td><td>A Windows profile already exists because NomadWiFi worked out the key from a sibling network, so switching here is immediate.</td></tr>
+          <tr><td>Band</td><td><code>2.4 GHz</code>, <code>5 GHz</code> or <code>6 GHz</code>, from the access point's centre frequency.</td></tr>
+          <tr><td>Badge</td><td><strong>Ready</strong> &mdash; Windows can connect now. <strong>Open</strong> &mdash; no key needed. <strong>Venue key</strong> &mdash; the key was inferred from a sibling. <strong>Password needed</strong> &mdash; you will be asked.</td></tr>
+          <tr><td>Standard</td><td>The 802.11 generation the radio advertises.</td></tr>
+          <tr><td>Signal</td><td>Percentage with the measured dBm in brackets.</td></tr>
+          <tr><td>Score</td><td>The overall ranking. Hover the row to see what produced it.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <strong>Connect</strong> joins that network. If a key is needed and NomadWiFi cannot infer one,
+      it asks in a dialog inside the window &mdash; not the Windows flyout &mdash; and rolls the
+      profile back if the key is wrong.
+    </p>
+
+    <h2 id="autoroam">Automatic roaming</h2>
+    <p>
+      <strong>Roam automatically</strong> in the footer hands the decision to the engine. It reacts
+      to a disconnect the instant the wireless service reports one, and otherwise moves only on
+      sustained degradation or a clearly better neighbour &mdash; never on a single bad sample. Every
+      switch is verified and rolled back if the new access point does not carry traffic. The
+      thresholds and the reasoning are described in
+      <a href="/docs/#roaming">how roaming decides</a>.
+    </p>
+    <div class="note">
+      The engine runs in the background process, not in the window. Closing the window to the tray
+      does not stop it, and there is only ever one thing making roaming decisions.
+    </div>
+
+    <h2 id="tray">Tray states</h2>
+    <p>The tray icon is tinted by what the connection is doing, so a glance is enough.</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>State</th><th>Means</th></tr></thead>
+        <tbody>
+          <tr><td>Good</td><td>Connected on a fast band with healthy latency.</td></tr>
+          <tr><td>Slow</td><td>Connected, but the link is weak or the channel is congested. A roam may be coming.</td></tr>
+          <tr><td>Roaming</td><td>A switch is in progress.</td></tr>
+          <tr><td>VPN held</td><td>The tunnel is paused around a roam or a portal sign-in. It will be resumed.</td></tr>
+          <tr><td>Offline</td><td>No association, or the link carries no traffic.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="startup">Start with Windows</h2>
+    <p>
+      The <strong>Start with Windows</strong> checkbox writes a single value under
+      <code>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</code>. It is per-user, needs no
+      elevation, installs no service, and unchecking it removes the value.
+    </p>
+
+    <h2 id="portal">Captive portals</h2>
+    <p>
+      When the gateway answers but the internet does not, NomadWiFi checks for a sign-in page and
+      says so instead of blaming the access point &mdash; and it does not roam away, because a portal
+      is not a bad access point.
+    </p>
+    <p>
+      If a VPN tunnel is up at the same time, the portal cannot load through it at all. NomadWiFi
+      offers <strong>Pause VPN and sign in</strong>: it holds the tunnel, opens the portal, and
+      resumes the tunnel once you are through. For clients it cannot control it gives you the
+      sequence to do by hand, with the reason.
+    </p>
+
+    <h2 id="layout">How it is packaged</h2>
+<pre><code>NomadWiFi\
+  nomadwifi.exe          <span class="tok-c"># the app you run</span>
+  core\nomadwifi.exe     <span class="tok-c"># the engine it drives</span>
+cli\
+  nomadwifi.exe          <span class="tok-c"># the standalone command line tool</span></code></pre>
+    <p>
+      Both are called <code>nomadwifi.exe</code> deliberately &mdash; the app should not be named
+      something else in the taskbar just because a CLI shares the project. They are kept in separate
+      folders because of it, and the app refuses any engine path that resolves to itself.
+    </p>
+    <p>
+      The app talks to the engine over one long-lived pipe of newline-delimited JSON rather than
+      spawning a process per refresh, which is what lets the engine push a roam or a drop to the
+      window the moment it happens. The protocol is sketched in the
+      <a href="/docs/cli#agent">CLI reference</a>.
+    </p>
+  </div>
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    <span>NomadWiFi 1.2.0 &middot; MIT licensed</span>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/docs">Docs</a>
+      <a href="/docs/cli">CLI</a>
+      <a href="https://github.com/dariomory/nomadwifi">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

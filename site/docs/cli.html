@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NomadWiFi CLI reference — commands, flags and JSON output</title>
+<meta name="description" content="Complete NomadWiFi command line reference: status, scan, optimize, connect, watch, vpn, warm, logs and agent, with every flag, the JSON shape each command returns, and exit codes.">
+<link rel="canonical" href="https://nomadwifi.mory.dev/docs/cli">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="NomadWiFi">
+<meta property="og:url" content="https://nomadwifi.mory.dev/docs/cli">
+<meta property="og:title" content="NomadWiFi CLI reference">
+<meta property="og:description" content="Every command, flag and JSON shape in the NomadWiFi command line tool.">
+<meta property="og:image" content="https://nomadwifi.mory.dev/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/assets/favicon.ico" sizes="any">
+<link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/assets/logo-512.png" alt=""><span class="wordmark">Nomad<span>WiFi</span></span></a>
+    <nav>
+      <a href="/docs">Docs</a>
+      <a href="/docs/cli" aria-current="page">CLI</a>
+      <a href="/docs/gui">Desktop app</a>
+      <a href="/docs/vpn">VPN</a>
+      <a href="https://github.com/dariomory/nomadwifi">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap docs">
+  <aside>
+    <h4>Documentation</h4>
+    <a href="/docs">Overview</a>
+    <a href="/docs/gui">Desktop app</a>
+    <a href="/docs/cli" aria-current="page">Command line</a>
+    <a href="/docs/vpn">VPN &amp; captive portals</a>
+    <h4 style="margin-top:22px">On this page</h4>
+    <a href="#status">status</a>
+    <a href="#scan">scan</a>
+    <a href="#optimize">optimize</a>
+    <a href="#connect">connect</a>
+    <a href="#watch">watch</a>
+    <a href="#vpn">vpn</a>
+    <a href="#warm">warm</a>
+    <a href="#logs">logs &amp; version</a>
+    <a href="#agent">agent</a>
+  </aside>
+
+  <div>
+    <h1>Command line reference</h1>
+    <p class="lede">
+      One executable, no dependencies, no installer. Every command accepts <code>--json</code> and
+      writes a single JSON document to stdout, so it composes with anything.
+    </p>
+
+    <figure class="shot">
+      <img src="/assets/screenshots/cli-help.png" width="1252" height="836"
+           alt="nomadwifi help output listing the status, scan, optimize, connect, watch, vpn, warm, logs and version commands with their flags.">
+      <figcaption><code>nomadwifi help</code></figcaption>
+    </figure>
+
+    <h2 id="usage">Usage</h2>
+<pre><code>nomadwifi &lt;command&gt; [flags]</code></pre>
+    <p>Run it with no command to open the interactive terminal menu.</p>
+
+    <h3>Global flags</h3>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Flag</th><th>Applies to</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr><td><code>--json</code></td><td>every command</td><td>Machine-readable output instead of the rendered view.</td></tr>
+          <tr><td><code>--dry-run</code></td><td><code>watch</code></td><td>Report what it would do without actually roaming.</td></tr>
+          <tr><td><code>--no-vpn</code></td><td><code>optimize</code>, <code>connect</code>, <code>watch</code></td><td>Do not pause or resume the VPN around a switch.</td></tr>
+          <tr><td><code>--password &lt;key&gt;</code></td><td><code>connect</code></td><td>The network key.</td></tr>
+          <tr><td><code>--interval &lt;seconds&gt;</code></td><td><code>watch</code></td><td>How often to measure. Default 20.</td></tr>
+          <tr><td><code>--all</code></td><td><code>scan</code></td><td>List every radio separately instead of one row per network.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="status">status</h2>
+    <p>Link statistics, gateway latency, captive portal state and VPN tunnels.</p>
+
+    <figure class="shot">
+      <img src="/assets/screenshots/cli-status.png" width="1252" height="647"
+           alt="nomadwifi status showing network, access point, band, signal, link speed, gateway latency, internet reachability and three VPN tunnels.">
+    </figure>
+
+<pre><code><span class="tok-c">$</span> nomadwifi status <span class="tok-f">--json</span>
+{
+  <span class="tok-k">"interface_name"</span>: "Wi-Fi",
+  <span class="tok-k">"description"</span>: "Intel(R) Dual Band Wireless-AC 8265",
+  <span class="tok-k">"connected"</span>: true,
+  <span class="tok-k">"ssid"</span>: "INDY_5G",
+  <span class="tok-k">"bssid"</span>: "e8:81:75:29:73:bd",
+  <span class="tok-k">"band"</span>: "5 GHz",
+  <span class="tok-k">"channel"</span>: 36,
+  <span class="tok-k">"radio_type"</span>: "802.11ac",
+  <span class="tok-k">"rx_mbps"</span>: 866,
+  <span class="tok-k">"tx_mbps"</span>: 866,
+  <span class="tok-k">"signal_percent"</span>: 100,
+  <span class="tok-k">"rssi"</span>: -43,
+  <span class="tok-k">"gateway_ip"</span>: "192.168.1.1",
+  <span class="tok-k">"gateway_latency_ms"</span>: 3.73,
+  <span class="tok-k">"captive_portal"</span>: false
+}</code></pre>
+    <p>
+      When a sign-in page is in the way, <code>captive_portal</code> is <code>true</code> and
+      <code>captive_portal_url</code> carries the address to open.
+    </p>
+
+    <h2 id="scan">scan</h2>
+    <p>
+      Ranks every network in range. By default one row per network, with the strongest radio
+      standing in for the rest; <code>--all</code> lists each BSSID separately, which is the view
+      the roaming engine works from.
+    </p>
+
+    <figure class="shot">
+      <img src="/assets/screenshots/cli-scan.png" width="1252" height="512"
+           alt="nomadwifi scan output: ranked table with network, band, channel, standard, signal, score and status columns.">
+    </figure>
+
+<pre><code><span class="tok-c">$</span> nomadwifi scan <span class="tok-f">--json</span>
+[
+  {
+    <span class="tok-k">"ssid"</span>: "INDY_5G",
+    <span class="tok-k">"bssid"</span>: "e8:81:75:29:73:bd",
+    <span class="tok-k">"signal_percent"</span>: 100,
+    <span class="tok-k">"rssi"</span>: -43,
+    <span class="tok-k">"band"</span>: "5 GHz",
+    <span class="tok-k">"channel"</span>: 36,
+    <span class="tok-k">"frequency_khz"</span>: 5180000,
+    <span class="tok-k">"radio_type"</span>: "802.11ax",
+    <span class="tok-k">"authentication"</span>: "WPA2-Personal",
+    <span class="tok-k">"cipher"</span>: "CCMP",
+    <span class="tok-k">"quality_score"</span>: 126,
+    <span class="tok-k">"auth_status"</span>: "SAVED",
+    <span class="tok-k">"is_warm"</span>: false,
+    <span class="tok-k">"reasons"</span>: ["Wi-Fi 6 (802.11ax)", "5 GHz band", "AP airtime nearly idle", "Saved network"],
+    <span class="tok-k">"has_channel_util"</span>: true,
+    <span class="tok-k">"station_count"</span>: 4,
+    <span class="tok-k">"bssid_count"</span>: 1
+  }
+]</code></pre>
+
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>band</code></td><td><code>2.4 GHz</code>, <code>5 GHz</code> or <code>6 GHz</code>, derived from <code>frequency_khz</code> &mdash; 6 GHz channel numbers overlap the lower bands, so the channel alone cannot tell them apart.</td></tr>
+          <tr><td><code>rssi</code></td><td>Measured signal in dBm. <code>signal_percent</code> is derived from it, not from the driver's link quality.</td></tr>
+          <tr><td><code>auth_status</code></td><td><code>SAVED</code>, <code>INFERRED</code> (a venue sibling's key), <code>OPEN</code> or <code>LOCKED</code>.</td></tr>
+          <tr><td><code>is_warm</code></td><td>NomadWiFi has already written a Windows profile for this network.</td></tr>
+          <tr><td><code>station_count</code>, <code>has_channel_util</code></td><td>From the access point's BSS Load element, when it publishes one.</td></tr>
+          <tr><td><code>bssid_count</code></td><td>How many radios this network was collapsed from. Only in the default view.</td></tr>
+          <tr><td><code>reasons</code></td><td>Plain-language explanation of the score.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="optimize">optimize</h2>
+    <p>
+      Switch to the best access point once and stop. If the new one does not reach the internet
+      within the deadline, the previous network is restored.
+    </p>
+<pre><code><span class="tok-c">$</span> nomadwifi optimize <span class="tok-f">--json</span>
+{
+  <span class="tok-k">"success"</span>: true,
+  <span class="tok-k">"switched"</span>: true,
+  <span class="tok-k">"current_ssid"</span>: "Hotel_Lobby",
+  <span class="tok-k">"target_ssid"</span>: "Hotel_5G",
+  <span class="tok-k">"band"</span>: "5 GHz",
+  <span class="tok-k">"reason"</span>: "5 GHz band, Wi-Fi 6 (802.11ax), stronger signal"
+}</code></pre>
+    <p><code>switched</code> is <code>false</code> when the current access point is already the best choice.</p>
+
+    <h2 id="connect">connect</h2>
+    <p>
+      Connect to a named network. Open networks need no key; for a locked one, either the key is
+      already saved, NomadWiFi can infer it from a venue sibling, or you supply it.
+    </p>
+<pre><code><span class="tok-c">$</span> nomadwifi connect <span class="tok-f">"Hotel Guest"</span>
+<span class="tok-c">$</span> nomadwifi connect <span class="tok-f">"Hotel_5G"</span> --password <span class="tok-f">"roomnumber123"</span></code></pre>
+    <div class="note">
+      If the key turns out to be wrong, the profile NomadWiFi wrote is rolled back rather than left
+      behind in your Windows profile list.
+    </div>
+
+    <h2 id="watch">watch</h2>
+    <p>
+      Stay resident: measure link health on an interval, react to disconnects the moment the wireless
+      service reports them, and roam when it is warranted. This is the same engine the desktop app runs.
+    </p>
+<pre><code><span class="tok-c">$</span> nomadwifi watch
+<span class="tok-c">$</span> nomadwifi watch --interval <span class="tok-f">10</span>
+<span class="tok-c">$</span> nomadwifi watch --dry-run     <span class="tok-c"># report decisions, change nothing</span>
+<span class="tok-c">$</span> nomadwifi watch --no-vpn      <span class="tok-c"># never touch the tunnel</span></code></pre>
+    <p>With <code>--json</code>, each event is written as one JSON object per line as it happens.</p>
+
+    <h2 id="vpn">vpn</h2>
+    <p>Inspect the tunnels on this machine, or coordinate one by hand.</p>
+
+    <figure class="shot">
+      <img src="/assets/screenshots/cli-vpn.png" width="1252" height="404"
+           alt="nomadwifi vpn status output listing detected tunnels, whether each is up, whether it owns the default route and whether NomadWiFi can pause it.">
+    </figure>
+
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Command</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr><td><code>nomadwifi vpn status</code></td><td>Every detected tunnel, whether it is up, whether it owns the default route, and whether NomadWiFi can control it.</td></tr>
+          <tr><td><code>nomadwifi vpn hold</code></td><td>Pause the active tunnel &mdash; for signing in to a captive portal, for instance.</td></tr>
+          <tr><td><code>nomadwifi vpn resume</code></td><td>Bring it back and flush the DNS cache.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+<pre><code><span class="tok-c">$</span> nomadwifi vpn status <span class="tok-f">--json</span>
+{
+  <span class="tok-k">"tunnels"</span>: [
+    {
+      <span class="tok-k">"provider"</span>: "NordVPN (NordLynx)",
+      <span class="tok-k">"adapter"</span>: "NordLynx",
+      <span class="tok-k">"up"</span>: true,
+      <span class="tok-k">"owns_default_route"</span>: true,
+      <span class="tok-k">"controllable"</span>: false,
+      <span class="tok-k">"control_hint"</span>: "This client has no command line on Windows. ...",
+      <span class="tok-k">"local_ip"</span>: "10.5.0.2"
+    }
+  ],
+  <span class="tok-k">"active"</span>: { <span class="tok-c">/* the tunnel that owns the default route, if any */</span> }
+}</code></pre>
+    <p>See <a href="/docs/vpn">VPN &amp; captive portals</a> for which clients are controllable and what happens when one is not.</p>
+
+    <h2 id="warm">warm</h2>
+    <p>
+      Prepare the current venue's networks for instant failover and clean up profiles that turned out
+      to be wrong. Runs automatically in the background while <code>watch</code> or the desktop app
+      is running; this command is the manual trigger.
+    </p>
+
+    <figure class="shot">
+      <img src="/assets/screenshots/cli-warm.png" width="1252" height="323"
+           alt="nomadwifi warm output listing networks prepared for instant failover and where each key came from.">
+    </figure>
+
+    <h2 id="logs">logs and version</h2>
+<pre><code><span class="tok-c">$</span> nomadwifi logs           <span class="tok-c"># the last 40 lines of activity</span>
+<span class="tok-c">$</span> nomadwifi version
+NomadWiFi 1.2.0
+Native Wi-Fi API: true
+State: C:\Users\you\.nomadwifi\state.json</code></pre>
+    <p>
+      <code>Native Wi-Fi API: false</code> means the Windows WLAN service could not be opened and
+      NomadWiFi has fallen back to parsing <code>netsh</code>. Everything still works, but scans are
+      slower and 6 GHz cannot be told apart from 5 GHz.
+    </p>
+
+    <h2 id="exit">Exit codes</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>0</code></td><td>The command completed. With <code>--json</code>, check the payload: a failed connect still exits 0 and reports <code>"success": false</code>.</td></tr>
+          <tr><td><code>1</code></td><td>The command could not run at all &mdash; no wireless interface, a scan the driver refused, an unknown command.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="agent">agent (the app's protocol)</h2>
+    <p>
+      <code>nomadwifi agent --stdio</code> starts the long-lived engine the desktop app drives. It
+      speaks newline-delimited JSON on stdin and stdout: one request per line, one reply per line,
+      plus unsolicited events. It is documented because it is stable, not because you need it &mdash;
+      scripts are better served by <code>--json</code>.
+    </p>
+<pre><code><span class="tok-c">&rarr;</span> {"id":1,"method":"scan"}
+<span class="tok-c">&larr;</span> {"id":1,"ok":true,"result":[ ... ]}
+<span class="tok-c">&larr;</span> {"event":"roamed","ssid":"Hotel_5G","reason":"previous AP stopped carrying traffic"}</code></pre>
+    <p>
+      Methods: <code>status</code>, <code>scan</code>, <code>optimize</code>, <code>connect</code>,
+      <code>vpn_status</code>, <code>vpn_hold</code>, <code>vpn_resume</code>, <code>warm</code>,
+      <code>set_autoroam</code>, <code>get_autoroam</code>, <code>version</code>, <code>ping</code>.
+      Events: <code>ready</code>, <code>log</code>, <code>roamed</code>.
+    </p>
+  </div>
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    <span>NomadWiFi 1.2.0 &middot; MIT licensed</span>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/docs">Docs</a>
+      <a href="/docs/gui">Desktop app</a>
+      <a href="https://github.com/dariomory/nomadwifi">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

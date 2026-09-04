@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NomadWiFi documentation — install, roaming, VPN and CLI</title>
+<meta name="description" content="Documentation for NomadWiFi: install the Windows desktop app or CLI, understand how access points are scored and roamed, prepare venue profiles, and coordinate a VPN tunnel around a Wi-Fi switch.">
+<link rel="canonical" href="https://nomadwifi.mory.dev/docs">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="NomadWiFi">
+<meta property="og:url" content="https://nomadwifi.mory.dev/docs">
+<meta property="og:title" content="NomadWiFi documentation">
+<meta property="og:description" content="Install, roaming behaviour, warming, VPN orchestration and the full command reference.">
+<meta property="og:image" content="https://nomadwifi.mory.dev/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/assets/favicon.ico" sizes="any">
+<link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/assets/logo-512.png" alt=""><span class="wordmark">Nomad<span>WiFi</span></span></a>
+    <nav>
+      <a href="/docs" aria-current="page">Docs</a>
+      <a href="/docs/cli">CLI</a>
+      <a href="/docs/gui">Desktop app</a>
+      <a href="/docs/vpn">VPN</a>
+      <a href="https://github.com/dariomory/nomadwifi">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap docs">
+  <aside>
+    <h4>Documentation</h4>
+    <a href="/docs" aria-current="page">Overview</a>
+    <a href="/docs/gui">Desktop app</a>
+    <a href="/docs/cli">Command line</a>
+    <a href="/docs/vpn">VPN &amp; captive portals</a>
+  </aside>
+
+  <div>
+    <h1>Documentation</h1>
+    <p class="lede">
+      NomadWiFi is one Go core with two faces: a WPF desktop app and a command line tool. Both make
+      the same decisions, because both run the same engine.
+    </p>
+
+    <h2 id="install">Install</h2>
+    <p>
+      Download the release archive and unzip it anywhere &mdash; there is no installer and nothing is
+      written outside your user profile. Two packages are published:
+    </p>
+
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Package</th><th>Contents</th><th>Use it when</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>NomadWiFi</code></td>
+            <td><code>nomadwifi.exe</code> (the app) plus <code>core\nomadwifi.exe</code> (the engine it drives)</td>
+            <td>You want the desktop app. Run the outer <code>nomadwifi.exe</code>.</td>
+          </tr>
+          <tr>
+            <td><code>cli</code></td>
+            <td><code>nomadwifi.exe</code>, self-contained</td>
+            <td>You want the terminal tool, or you are scripting.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      Both executables are called <code>nomadwifi.exe</code> on purpose, which is why they live in
+      separate folders. The app resolves its engine from <code>core\</code> first and refuses to
+      launch itself by mistake.
+    </p>
+
+    <p>To put the CLI on your <code>PATH</code>:</p>
+<pre><code><span class="tok-c"># PowerShell</span>
+<span class="tok-k">Copy-Item</span> .\cli\nomadwifi.exe <span class="tok-f">"$env:USERPROFILE\.local\bin\"</span>
+</code></pre>
+
+    <div class="note">
+      <strong>No administrator rights needed.</strong> Wi-Fi profiles are written per-user, so
+      scanning, connecting, warming and roaming all work from a normal account. The only action that
+      asks for elevation is pausing a VPN client that has no command line of its own.
+    </div>
+
+    <h2 id="requirements">Requirements</h2>
+    <ul class="checks">
+      <li>Windows 10 or Windows 11, 64-bit.</li>
+      <li>A Wi-Fi adapter with the Windows WLAN service running (the normal case).</li>
+      <li>.NET Framework 4.8 for the desktop app &mdash; shipped with Windows 10 1903 and later. The CLI needs nothing.</li>
+    </ul>
+
+    <h2 id="scoring">How access points are scored</h2>
+    <p>
+      Every radio in range gets a quality score, and the score is explained rather than asserted
+      &mdash; hover a row in the app, or read <code>reasons</code> in the JSON output.
+    </p>
+
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Signal</th><th>Effect</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Band</td><td>6 GHz &gt; 5 GHz &gt; 2.4 GHz</td><td>Wider channels, far less interference.</td></tr>
+          <tr><td>802.11 standard</td><td><code>be</code> &gt; <code>ax</code> &gt; <code>ac</code> &gt; <code>n</code> &gt; <code>g</code></td><td>Newer radios sustain higher throughput at the same signal.</td></tr>
+          <tr><td>RSSI</td><td>Scaled &minus;100 dBm &rarr; 0%, &minus;50 dBm &rarr; 100%</td><td>Derived from measured dBm, not from the driver's link quality, which reports the connected access point at ~99% regardless.</td></tr>
+          <tr><td>Airtime congestion</td><td>Penalty as BSS Load rises</td><td>A strong access point with forty clients on it is slower than a middling one that is idle.</td></tr>
+          <tr><td>Encryption</td><td>Small bonus for modern ciphers</td><td>WPA3/CCMP over TKIP or none.</td></tr>
+          <tr><td>Readiness</td><td>Saved &gt; prepared &gt; open &gt; needs a password</td><td>A network that cannot be joined right now is not a useful roam target.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="roaming">When it decides to move</h2>
+    <p>
+      Roaming is deliberately reluctant. A switch costs a second of connectivity, so it happens for a
+      reason and not on a single bad sample.
+    </p>
+    <ul class="checks">
+      <li><strong>A drop.</strong> The wireless service's own disconnect notification arrives in about
+          a hundred milliseconds; the candidate ladder is already built, so recovery starts immediately.</li>
+      <li><strong>Sustained degradation.</strong> Several consecutive samples below the health
+          thresholds &mdash; receive rate, signal, latency, jitter, loss &mdash; not one.</li>
+      <li><strong>A clearly better neighbour.</strong> Another access point outscores the current one
+          by a margin, and the cooldown since the last switch has passed.</li>
+    </ul>
+    <p>
+      Every switch verifies the result: association, then a gateway probe, then internet reachability.
+      If the new access point does not carry traffic within the deadline, NomadWiFi reconnects the
+      previous one and puts the failed access point in a penalty box so it is not tried again straight away.
+    </p>
+
+    <div class="note">
+      A captive portal is <strong>not</strong> treated as degradation. You are behind a sign-in page,
+      not on a bad access point, and roaming away would just lose your place in the queue.
+    </div>
+
+    <h2 id="warming">Warming</h2>
+    <p>
+      Venues publish the same key across several names &mdash; <code>Hotel</code>,
+      <code>Hotel_5G</code>, <code>Hotel Lobby</code>, <code>Hotel Floor2</code>. Warming recognises
+      the family, copies the key you already have onto the siblings, and writes the Windows profiles
+      ahead of time, so failover is a connect rather than a connect-plus-prompt.
+    </p>
+    <ul class="checks">
+      <li>Profiles are written with <code>connectionMode=manual</code>, so Windows will not
+          auto-connect behind the roamer's back.</li>
+      <li>They are per-user, so no elevation is required.</li>
+      <li>Every profile NomadWiFi creates is recorded in <code>%USERPROFILE%\.nomadwifi\state.json</code>
+          and marked verified only after it actually associates.</li>
+      <li>A guess that fails twice is deleted and the network is penalised, so bad guesses do not
+          accumulate in your Windows profile list.</li>
+    </ul>
+
+    <h2 id="state">Where it keeps things</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Path</th><th>Contents</th></tr></thead>
+        <tbody>
+          <tr><td><code>%USERPROFILE%\.nomadwifi\state.json</code></td><td>Profiles NomadWiFi created, verification status, failure counts, penalty box, last venue.</td></tr>
+          <tr><td><code>%USERPROFILE%\.nomadwifi\scan-cache.json</code></td><td>The rolling view of access points, so a one-shot command sees the whole venue rather than one sweep.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Delete either file to start fresh; both are rebuilt automatically.</p>
+
+    <h2 id="next">Next</h2>
+    <div class="grid grid-3" style="margin-top:18px">
+      <div class="card"><h3><a href="/docs/gui">Desktop app</a></h3><p>Window, tray states, auto-roam, captive portal banner, starting with Windows.</p></div>
+      <div class="card"><h3><a href="/docs/cli">Command line</a></h3><p>Every command and flag, the JSON shapes, and the agent protocol.</p></div>
+      <div class="card"><h3><a href="/docs/vpn">VPN &amp; portals</a></h3><p>Why Wi-Fi breaks under a tunnel, which clients can be controlled, and what happens when they cannot.</p></div>
+    </div>
+  </div>
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    <span>NomadWiFi 1.2.0 &middot; MIT licensed</span>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/docs/cli">CLI</a>
+      <a href="/docs/gui">Desktop app</a>
+      <a href="https://github.com/dariomory/nomadwifi">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

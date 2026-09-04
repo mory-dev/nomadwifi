@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NomadWiFi — Wi-Fi roaming and 5 GHz optimizer for Windows</title>
+<meta name="description" content="NomadWiFi fixes sticky access points on Windows. It forces 5 GHz, switches networks in about a second when the connection drops, and pauses your VPN around the roam so hotel and cafe Wi-Fi just works. Free, open source, no driver hacks.">
+<link rel="canonical" href="https://nomadwifi.mory.dev/">
+<meta name="robots" content="index, follow, max-image-preview:large">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="NomadWiFi">
+<meta property="og:url" content="https://nomadwifi.mory.dev/">
+<meta property="og:title" content="NomadWiFi — Wi-Fi roaming and 5 GHz optimizer for Windows">
+<meta property="og:description" content="Fixes sticky access points on Windows: forces 5 GHz, switches networks in about a second when the link drops, and pauses your VPN around the roam.">
+<meta property="og:image" content="https://nomadwifi.mory.dev/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="NomadWiFi — Wi-Fi roaming and 5 GHz optimizer for Windows">
+<meta name="twitter:description" content="Fixes sticky access points on Windows: forces 5 GHz, switches networks in about a second when the link drops, and pauses your VPN around the roam.">
+<meta name="twitter:image" content="https://nomadwifi.mory.dev/assets/og.png">
+
+<link rel="icon" href="/assets/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/logo-512.png">
+<link rel="stylesheet" href="/assets/styles.css">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "NomadWiFi",
+  "applicationCategory": "UtilitiesApplication",
+  "applicationSubCategory": "Network utility",
+  "operatingSystem": "Windows 10, Windows 11",
+  "softwareVersion": "1.2.0",
+  "url": "https://nomadwifi.mory.dev/",
+  "downloadUrl": "https://github.com/dariomory/nomadwifi/releases",
+  "image": "https://nomadwifi.mory.dev/assets/og.png",
+  "screenshot": "https://nomadwifi.mory.dev/assets/screenshots/gui-main.png",
+  "license": "https://opensource.org/licenses/MIT",
+  "description": "NomadWiFi is a Windows Wi-Fi roaming and band optimizer for people who work from hotels, cafes and coworking spaces. It ranks every access point in range using the Native Wifi API, switches away from a sticky 2.4 GHz radio, recovers in about a second when the link drops, and pauses and resumes a VPN tunnel around the switch.",
+  "featureList": [
+    "Forces 5 GHz and Wi-Fi 6 access points over sticky 2.4 GHz radios",
+    "Automatic failover when the Wi-Fi connection drops",
+    "VPN hold and resume around a roam",
+    "Captive portal detection with VPN-aware sign-in guidance",
+    "Prepares venue profiles in advance for instant switching",
+    "Command line interface with JSON output"
+  ],
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Why does Windows stay on a weak 2.4 GHz access point?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Windows only roams when the current association is close to unusable, and it treats the connected radio as far stronger than it is: the driver reports link quality near 99% for the associated access point regardless of its real signal. NomadWiFi scores every access point from its measured RSSI instead, so a weak incumbent no longer outranks a strong neighbour, and it switches on your behalf." }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I force Windows to use the 5 GHz band?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Most adapters expose a Preferred Band driver setting, but it is a hint rather than a rule and it does nothing when the venue publishes one SSID across both bands. NomadWiFi connects to a specific access point, so it can move you onto the 5 GHz or 6 GHz radio of the same network and keep you there." }
+    },
+    {
+      "@type": "Question",
+      "name": "Why does connecting to Wi-Fi break while my VPN is on?",
+      "acceptedAnswer": { "@type": "Answer", "text": "The tunnel keeps the default route and its DNS while the underlying Wi-Fi link changes, so the new network is never really reached, and a captive portal cannot load through the tunnel at all. NomadWiFi holds the tunnel for the moment of the switch, verifies the new link carries traffic, then resumes it and flushes the DNS cache." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does NomadWiFi need administrator rights?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. Scanning, ranking, connecting, preparing profiles and roaming all work as a normal user. Administrator rights are only needed to pause a VPN client that has no command line of its own, and NomadWiFi tells you when that is the case rather than failing silently." }
+    }
+  ]
+}
+</script>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/assets/logo-512.png" alt=""><span class="wordmark">Nomad<span>WiFi</span></span></a>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="/docs">Docs</a>
+      <a href="/docs/vpn">VPN</a>
+      <a href="https://github.com/dariomory/nomadwifi">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<div class="wrap hero">
+  <span class="eyebrow">Windows 10 &amp; 11 · Free · Open source</span>
+  <h1>Your laptop is stuck on the <em>worst</em> access point in the building.</h1>
+  <p class="lede">
+    Windows clings to the first radio it associated with. You walk to the far end of the cafe, the
+    signal drops to &minus;80 dBm, and it still will not move &mdash; while a 5 GHz access point two
+    metres away sits idle. NomadWiFi measures every access point in range and moves you to the one
+    that is actually good, then keeps you there.
+  </p>
+  <div class="cta-row">
+    <a class="btn btn-primary" href="https://github.com/dariomory/nomadwifi/releases">Download for Windows</a>
+    <a class="btn btn-ghost" href="/docs">Read the docs</a>
+  </div>
+
+  <figure class="shot shot-hero">
+    <img src="/assets/screenshots/gui-main.png" width="1350" height="1044"
+         alt="The NomadWiFi desktop app showing the connected 5 GHz network, its signal, link speed and latency graph, a NordVPN card, and a ranked list of nearby networks with band, readiness and score.">
+    <figcaption>The desktop app: live link health, VPN state, and every network in range ranked by measured quality.</figcaption>
+  </figure>
+</div>
+
+<section id="how">
+  <div class="wrap">
+    <h2>What it actually does</h2>
+    <p class="section-lede">
+      No driver patches, no registry surgery, no third-party service. NomadWiFi talks to the Windows
+      Native Wifi API directly and makes the roaming decisions Windows will not make for you.
+    </p>
+
+    <div class="grid grid-3">
+      <div class="card">
+        <div class="ico">&#9679;</div>
+        <h3>Honest signal ranking</h3>
+        <p>Windows reports the access point you are joined to at ~99% link quality no matter its real
+           strength, which is why the incumbent always wins. NomadWiFi scores every radio from its
+           measured RSSI, band, standard and airtime congestion, so the comparison is fair.</p>
+      </div>
+      <div class="card">
+        <div class="ico">&#8644;</div>
+        <h3>Recovers when the link drops</h3>
+        <p>It subscribes to the wireless service's own disconnect notifications instead of polling, so
+           a drop is noticed in roughly a hundred milliseconds and the next candidate is already
+           chosen. If the new access point fails to carry traffic, it rolls back.</p>
+      </div>
+      <div class="card">
+        <div class="ico">&#9968;</div>
+        <h3>Prepares the venue in advance</h3>
+        <p>Hotels publish the same key across <code>Lobby</code>, <code>_5G</code> and
+           <code>Floor2</code>. NomadWiFi works out which networks belong to the venue, writes the
+           profiles before you need them, and deletes the guesses that turn out to be wrong.</p>
+      </div>
+      <div class="card">
+        <div class="ico">&#128274;</div>
+        <h3>Works with your VPN</h3>
+        <p>It holds the tunnel for the moment of the switch, checks the new link really carries
+           traffic, resumes the tunnel and flushes DNS &mdash; the off-and-on-again dance, done for
+           you. <a href="/docs/vpn">How that works &rarr;</a></p>
+      </div>
+      <div class="card">
+        <div class="ico">&#9993;</div>
+        <h3>Understands captive portals</h3>
+        <p>A hotel sign-in page cannot load through a VPN. NomadWiFi says so plainly, offers one click
+           to pause the tunnel, and does not mistake &ldquo;not signed in yet&rdquo; for a bad
+           access point.</p>
+      </div>
+      <div class="card">
+        <div class="ico">&#9881;</div>
+        <h3>No elevation required</h3>
+        <p>Profiles are written per-user, so scanning, connecting, warming and roaming all work as a
+           normal account. Administrator rights are only ever asked for to pause a VPN client that
+           has no command line.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Or drive it from the terminal</h2>
+    <p class="section-lede">
+      The same engine ships as a single self-contained executable. Every command takes
+      <code>--json</code>, so it scripts cleanly.
+    </p>
+
+    <figure class="shot">
+      <img src="/assets/screenshots/cli-scan.png" width="1252" height="512"
+           alt="nomadwifi scan output: a ranked table of networks with band, channel, 802.11 standard, signal bar with dBm, quality score and connection readiness.">
+      <figcaption><code>nomadwifi scan</code> — every network in range, ranked, with the reason it scored where it did.</figcaption>
+    </figure>
+
+    <div class="grid grid-2" style="margin-top:26px">
+      <figure class="shot">
+        <img src="/assets/screenshots/cli-status.png" width="1252" height="647"
+             alt="nomadwifi status output showing the connected network, access point, band, signal, link speed, gateway latency, internet reachability and VPN tunnel state.">
+        <figcaption><code>nomadwifi status</code> — link health and VPN state at a glance.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="/assets/screenshots/cli-warm.png" width="1252" height="323"
+             alt="nomadwifi warm output listing venue networks prepared for instant failover.">
+        <figcaption><code>nomadwifi warm</code> — prepare the venue's networks before you need them.</figcaption>
+      </figure>
+    </div>
+
+    <div class="cta-row" style="margin-top:32px">
+      <a class="btn btn-ghost" href="/docs/cli">Full command reference</a>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Common questions</h2>
+
+    <h3>Why does Windows stay on a weak 2.4 GHz access point?</h3>
+    <p style="color:var(--muted);max-width:70ch">
+      Two reasons. Windows only roams when the current association is close to unusable, and the
+      driver reports the connected radio at around 99% link quality regardless of its real signal
+      &mdash; so the access point you are already on always looks like the best one available.
+      NomadWiFi scores every access point from measured RSSI, which puts them all on the same scale.
+    </p>
+
+    <h3>Can I force Windows onto the 5 GHz band?</h3>
+    <p style="color:var(--muted);max-width:70ch">
+      Most adapters have a <em>Preferred Band</em> driver setting, but it is a hint, and it does
+      nothing when the venue publishes one SSID across both bands. NomadWiFi connects to a specific
+      access point rather than a network name, so it can move you onto the 5 GHz or 6 GHz radio of
+      the same network and keep you there.
+    </p>
+
+    <h3>Why does joining Wi-Fi break while the VPN is on?</h3>
+    <p style="color:var(--muted);max-width:70ch">
+      The tunnel holds the default route and the DNS configuration while the Wi-Fi link underneath it
+      changes, so the new network is never properly reached &mdash; and a captive portal cannot load
+      through the tunnel at all. Turning the VPN off and on again fixes it because that rebuilds the
+      route. NomadWiFi does that for you, at the right moment.
+      <a href="/docs/vpn">The long version &rarr;</a>
+    </p>
+
+    <h3>Does it need administrator rights?</h3>
+    <p style="color:var(--muted);max-width:70ch">
+      No. Scanning, ranking, connecting, preparing profiles and roaming all work as a normal user.
+      Elevation is only needed to pause a VPN client that offers no command line of its own, and
+      NomadWiFi tells you when that is the case instead of failing quietly.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>NomadWiFi 1.2.0 &middot; MIT licensed</span>
+    <nav>
+      <a href="/docs">Docs</a>
+      <a href="/docs/cli">CLI</a>
+      <a href="/docs/gui">Desktop app</a>
+      <a href="/docs/vpn">VPN</a>
+      <a href="https://github.com/dariomory/nomadwifi">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>
