@@ -1,0 +1,85 @@
+name: Submit to winget
+
+# Triggered by the tag push, deliberately NOT by the `release` event.
+#
+# GitHub Actions suppresses `release` events that were fired by another
+# workflow's action, and the release here is created by the release workflow's
+# `gh release create`. A `release`-triggered job would therefore never run.
+#
+# workflow_run would also work, but keying off the tag keeps the two pipelines
+# independent: a failed winget submission does not need a release re-run.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to submit, without the leading v
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: winget-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    name: Update the winget manifest
+    runs-on: windows-latest
+    steps:
+      - name: Resolve the version
+        id: version
+        shell: bash
+        run: |
+          if [[ -n "${{ inputs.version }}" ]]; then
+            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            ref="${{ github.ref_name }}"
+            echo "value=${ref#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The release workflow and this one both start from the tag push, so the
+      # installer may not be published yet. Wait for it rather than racing.
+      - name: Wait for the installer asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v='${{ steps.version.outputs.value }}'
+          asset="NomadWiFi-Setup-$v.exe"
+          for attempt in $(seq 1 60); do
+            if gh release view "v$v" --repo "${{ github.repository }}" \
+                 --json assets --jq '.assets[].name' 2>/dev/null | grep -qx "$asset"; then
+              echo "$asset is published"
+              exit 0
+            fi
+            echo "attempt $attempt: waiting for $asset"
+            sleep 30
+          done
+          echo "::error::$asset was never published; not submitting to winget"
+          exit 1
+
+      # wingetcreate opens the pull request against microsoft/winget-pkgs. That
+      # is a cross-repository PR, which GITHUB_TOKEN cannot raise -- it needs a
+      # PAT with `repo` scope, stored as WINGET_TOKEN.
+      - name: Submit the manifest update
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if (-not $env:WINGET_TOKEN) {
+            Write-Host '::warning::WINGET_TOKEN is not set; skipping the winget submission.'
+            exit 0
+          }
+
+          $v = '${{ steps.version.outputs.value }}'
+          $url = "https://github.com/${{ github.repository }}/releases/download/v$v/NomadWiFi-Setup-$v.exe"
+
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          .\wingetcreate.exe update mory-dev.NomadWiFi `
+            --version $v `
+            --urls "$url|x64|user" `
+            --submit `
+            --token $env:WINGET_TOKEN

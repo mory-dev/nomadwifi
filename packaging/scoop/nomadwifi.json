@@ -1,0 +1,30 @@
+{
+    "version": "1.3.0",
+    "description": "Wi-Fi roaming and band optimizer for Windows. Ranks every access point in range, prefers 5 GHz, and switches automatically when the link degrades.",
+    "homepage": "https://nomadwifi.mory.dev",
+    "license": "MIT",
+    "notes": [
+        "This installs the command line tool only.",
+        "For the desktop app: winget install mory-dev.NomadWiFi"
+    ],
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/mory-dev/nomadwifi/releases/download/v1.3.0/nomadwifi-cli-1.3.0-windows.zip",
+            "hash": "2259fc65b6d700ef234da0946d45c1eac76d721e0a3e966aaa1e070dac1b4e55"
+        }
+    },
+    "bin": "nomadwifi.exe",
+    "checkver": {
+        "github": "https://github.com/mory-dev/nomadwifi"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/mory-dev/nomadwifi/releases/download/v$version/nomadwifi-cli-$version-windows.zip"
+            }
+        },
+        "hash": {
+            "url": "https://github.com/mory-dev/nomadwifi/releases/download/v$version/SHA256SUMS.txt"
+        }
+    }
+}
