@@ -123,6 +123,14 @@ header.site nav a:hover, header.site nav a[aria-current] { color: var(--text); t
 .btn-ghost { border-color: var(--line); color: var(--text); background: var(--card); }
 .btn-ghost:hover { border-color: var(--dim); }
 
+.install-alt {
+  margin: 16px 0 0;
+  font-size: 14px;
+  color: var(--dim);
+}
+.install-alt code { font-size: 13px; margin-left: 4px; }
+.install-alt .dim { color: var(--dim); }
+
 /* ---------- shots ---------- */
 
 figure.shot { margin: 0; }

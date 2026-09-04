@@ -39,6 +39,12 @@
     <a href="/docs/gui">Desktop app</a>
     <a href="/docs/cli">Command line</a>
     <a href="/docs/vpn">VPN &amp; captive portals</a>
+    <h4 style="margin-top:22px">On this page</h4>
+    <a href="#install">Install</a>
+    <a href="#updating">Updating</a>
+    <a href="#scoring">Scoring</a>
+    <a href="#roaming">Roaming</a>
+    <a href="#warming">Warming</a>
   </aside>
 
   <div>
@@ -50,38 +56,69 @@
 
     <h2 id="install">Install</h2>
     <p>
-      Download the release archive and unzip it anywhere &mdash; there is no installer and nothing is
-      written outside your user profile. Two packages are published:
+      The installer is the easiest route, and the one the in-app update prompt uses. It is
+      per-user: it installs to <code>%LOCALAPPDATA%\Programs\NomadWiFi</code> and never asks for
+      administrator rights, on install or on update.
     </p>
 
-    <div class="table-scroll">
-      <table>
-        <thead><tr><th>Package</th><th>Contents</th><th>Use it when</th></tr></thead>
-        <tbody>
-          <tr>
-            <td><code>NomadWiFi</code></td>
-            <td><code>nomadwifi.exe</code> (the app) plus <code>core\nomadwifi.exe</code> (the engine it drives)</td>
-            <td>You want the desktop app. Run the outer <code>nomadwifi.exe</code>.</td>
-          </tr>
-          <tr>
-            <td><code>cli</code></td>
-            <td><code>nomadwifi.exe</code>, self-contained</td>
-            <td>You want the terminal tool, or you are scripting.</td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="cta-row" style="margin:8px 0 26px">
+      <a class="btn btn-primary" href="https://github.com/mory-dev/nomadwifi/releases/latest/download/NomadWiFi-Setup.exe">Download the installer</a>
+      <a class="btn btn-ghost" href="https://github.com/mory-dev/nomadwifi/releases">All releases</a>
     </div>
 
+    <p>Or with a package manager:</p>
+<pre><code><span class="tok-c"># the desktop app and the CLI</span>
+winget install <span class="tok-f">mory-dev.NomadWiFi</span>
+
+<span class="tok-c"># the CLI on its own</span>
+scoop install <span class="tok-f">nomadwifi</span>
+
+<span class="tok-c"># the CLI from source -- note this build is not code-signed</span>
+go install <span class="tok-f">github.com/mory-dev/nomadwifi/cmd/nomadwifi@latest</span></code></pre>
+
+    <h3>What the installer does</h3>
+    <ul class="checks">
+      <li>Installs per-user, with no UAC prompt at any point.</li>
+      <li>Adds a Start Menu entry and an Add/Remove Programs entry.</li>
+      <li>Optionally starts NomadWiFi when you sign in, and optionally puts
+          <code>nomadwifi</code> on your <code>PATH</code>.</li>
+      <li>Checks for .NET Framework 4.8 and links the download if it is missing.</li>
+      <li>Closes a running copy in order to update it, then puts it back as it found it.</li>
+      <li>On uninstall, removes everything it added and <em>asks</em> before deleting the networks
+          NomadWiFi learned.</li>
+    </ul>
+
+    <h3>Installed layout</h3>
+<pre><code>%LOCALAPPDATA%\Programs\NomadWiFi\
+  nomadwifi.exe        <span class="tok-c"># the desktop app</span>
+  core\nomadwifi.exe   <span class="tok-c"># the engine it drives, and the CLI</span></code></pre>
+
     <p>
-      Both executables are called <code>nomadwifi.exe</code> on purpose, which is why they live in
-      separate folders. The app resolves its engine from <code>core\</code> first and refuses to
-      launch itself by mistake.
+      Both are called <code>nomadwifi.exe</code> on purpose, which is why they live in separate
+      folders: the app resolves its engine from <code>core\</code> only, and refuses any candidate
+      that resolves to itself. It is the same binary either way, so putting <code>core\</code> on
+      your <code>PATH</code> is all the CLI needs.
     </p>
 
-    <p>To put the CLI on your <code>PATH</code>:</p>
-<pre><code><span class="tok-c"># PowerShell</span>
-<span class="tok-k">Copy-Item</span> .\cli\nomadwifi.exe <span class="tok-f">"$env:USERPROFILE\.local\bin\"</span>
-</code></pre>
+    <h3>Portable archives</h3>
+    <p>
+      Zips are still published for anyone who would rather not install anything:
+      <code>NomadWiFi-windows.zip</code> (app plus engine) and
+      <code>nomadwifi-cli-windows.zip</code> (the CLI alone). Unzip either anywhere &mdash; the app
+      still needs <code>core\nomadwifi.exe</code> beside it.
+    </p>
+
+    <h3 id="updating">Updating</h3>
+    <p>
+      NomadWiFi checks for a new release at most once a day and offers it in a banner with an
+      <strong>Install now</strong> button. The download is verified against the published SHA-256
+      digest before it is run, and a mismatch is refused rather than executed. Dismissing the
+      banner silences that specific version, not all future ones.
+    </p>
+    <p>From a terminal:</p>
+<pre><code><span class="tok-c">$</span> nomadwifi update             <span class="tok-c"># report whether a newer release exists</span>
+<span class="tok-c">$</span> nomadwifi update --install   <span class="tok-c"># download, verify and run it</span>
+<span class="tok-c">$</span> winget upgrade mory-dev.NomadWiFi</code></pre>
 
     <div class="note">
       <strong>No administrator rights needed.</strong> Wi-Fi profiles are written per-user, so
