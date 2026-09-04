@@ -37,7 +37,12 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $dist = Join-Path $root 'dist'
 
-$version = if ($Version) { $Version.TrimStart('v') } else { '1.2.0' }
+# VERSION is the single source of truth. Everything Windows shows the user --
+# versioninfo.json, AssemblyInfo.cs and both side-by-side manifests -- is
+# generated from it below, because keeping four hand-edited copies in step is
+# exactly the kind of thing that silently drifts.
+$versionFile = Join-Path $PSScriptRoot 'VERSION'
+$version = if ($Version) { $Version.TrimStart('v') } else { (Get-Content $versionFile -Raw).Trim() }
 
 # Set-Content -Encoding utf8 emits a BOM on PowerShell 5.1, and goversioninfo
 # refuses to parse a JSON file that starts with one.
@@ -80,7 +85,11 @@ function Set-StampedVersion($ver) {
     }
 }
 
-if ($Version) { Set-StampedVersion $version }
+# Always stamp, not just for releases. When the files already agree this
+# rewrites identical bytes and leaves the tree clean, so the guarantee is that
+# a committed version can never disagree with VERSION.
+if ($Version) { Write-Utf8NoBom $versionFile ($version + "`n") }
+Set-StampedVersion $version
 
 function Write-Step($message) {
     Write-Host "==> $message" -ForegroundColor Cyan
