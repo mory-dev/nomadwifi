@@ -1,15 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Forms;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Shapes;
 using System.Windows.Threading;
 using NomadWiFi.UI.Models;
 using NomadWiFi.UI.Services;
@@ -22,159 +19,209 @@ namespace NomadWiFi.UI
 {
     public partial class MainWindow : Window
     {
-        private readonly NomadCoreClient _client = new NomadCoreClient();
+        private readonly AgentClient _agent = new AgentClient();
         private readonly DispatcherTimer _pollTimer = new DispatcherTimer();
-        private readonly DispatcherTimer _watchdogTimer = new DispatcherTimer();
         private readonly List<double> _latencyHistory = new List<double>();
+
         private NotifyIcon _notifyIcon;
         private ToolStripMenuItem _trayMenuAutoRoam;
         private ToolStripMenuItem _trayMenuStartup;
 
-        private bool _isBusy = false;
-        private bool _isExiting = false;
+        private bool _isBusy;
+        private bool _isExiting;
         private bool _isAutoRoamEnabled = true;
-        private DateTime _lastRoamTime = DateTime.MinValue;
+        private TrayState _trayState = TrayState.Offline;
         private string _captivePortalUrl = "http://neverssl.com";
         private string _pendingModalSsid = "";
         private List<AccessPoint> _currentAps = new List<AccessPoint>();
-        private InterfaceStatus _lastStatus;
+        private VpnStatus _vpnStatus;
 
         public MainWindow() : this(false) { }
 
         public MainWindow(bool startMinimized)
         {
             InitializeComponent();
+
+            Icon = Branding.WindowIcon();
+            ImgBrandMark.Source = Branding.WindowIcon();
             SetupSystemTray();
 
-            // Load settings
             ChkAutoRoam.IsChecked = _isAutoRoamEnabled;
+            // Correct a stale entry before reading it: the app may have been
+            // moved since it was registered.
+            StartupManager.RefreshStartupPath();
             ChkStartup.IsChecked = StartupManager.IsStartupEnabled();
 
-            // 1. UI Auto-refresh timer (Every 5s ONLY when in foreground view)
+            _agent.EventReceived += OnAgentEvent;
+            _agent.Disconnected += OnAgentDisconnected;
+            _agent.Start();
+
+            // The window only refreshes while it is on screen. Every roaming
+            // decision lives in the core process, so nothing depends on the
+            // window being open.
             _pollTimer.Interval = TimeSpan.FromSeconds(5);
             _pollTimer.Tick += async (s, e) =>
             {
-                if (!IsVisible || WindowState == WindowState.Minimized || !IsActive)
-                {
-                    return; // 0% CPU & 0 scans when in tray, minimized, or behind other windows
-                }
-                await RefreshStatusAsync();
-                await RefreshScanAsync();
+                if (!IsVisible || WindowState == WindowState.Minimized || !IsActive) return;
+                await RefreshAllAsync();
             };
             _pollTimer.Start();
 
-            // 2. Autonomous Background Roam Watchdog (Runs every 15s even in tray)
-            _watchdogTimer.Interval = TimeSpan.FromSeconds(15);
-            _watchdogTimer.Tick += async (s, e) => await RunWatchdogCheckAsync();
-            _watchdogTimer.Start();
-
             Loaded += async (s, e) =>
             {
-                if (startMinimized)
-                {
-                    Hide();
-                }
-                else
-                {
-                    await RefreshStatusAsync();
-                    await RefreshScanAsync();
-                }
+                FitToWorkArea();
+                if (startMinimized) { Hide(); return; }
+                await RefreshAllAsync();
             };
 
-            // Instant refresh on focus / restore
             Activated += async (s, e) =>
             {
-                if (IsVisible && WindowState != WindowState.Minimized)
-                {
-                    await RefreshStatusAsync();
-                    await RefreshScanAsync();
-                }
+                if (IsVisible && WindowState != WindowState.Minimized) await RefreshAllAsync();
             };
 
             StateChanged += async (s, e) =>
             {
-                if (WindowState != WindowState.Minimized && IsVisible)
-                {
-                    await RefreshStatusAsync();
-                    await RefreshScanAsync();
-                }
+                if (WindowState != WindowState.Minimized && IsVisible) await RefreshAllAsync();
             };
 
             Closing += MainWindow_Closing;
         }
 
-        #region System Tray Integration
+        /// <summary>
+        /// Shrinks and re-centres the window if it does not fit the screen.
+        ///
+        /// The default size is comfortable on a desktop, but a small laptop at
+        /// 150% scaling has well under 900 logical pixels of height, and
+        /// without this the title bar opens above the top of the screen.
+        /// </summary>
+        private void FitToWorkArea()
+        {
+            var area = SystemParameters.WorkArea;
+            if (area.Width <= 0 || area.Height <= 0) return;
+
+            const double margin = 24;
+            var maxWidth = Math.Max(MinWidth, area.Width - margin);
+            var maxHeight = Math.Max(MinHeight, area.Height - margin);
+
+            if (Width > maxWidth) Width = maxWidth;
+            if (Height > maxHeight) Height = maxHeight;
+
+            Left = area.Left + Math.Max(0, (area.Width - Width) / 2);
+            Top = area.Top + Math.Max(0, (area.Height - Height) / 2);
+        }
+
+        #region Core agent events
+
+        private void OnAgentEvent(string name, object payload)
+        {
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                if (name == "log")
+                {
+                    var message = ReadStringField(payload, "message");
+                    if (!string.IsNullOrEmpty(message)) TxtActivity.Text = message;
+                    return;
+                }
+
+                if (name == "roamed")
+                {
+                    var to = ReadStringField(payload, "To");
+                    var label = string.IsNullOrEmpty(to) ? "a better access point" : to;
+                    TxtRoamCelebrationMsg.Text = "Moved to " + label + " for a faster, steadier connection.";
+                    BorderRoamCelebration.Visibility = Visibility.Visible;
+                    Notify("Switched access point", "Now connected to " + label + ".");
+                    await RefreshAllAsync();
+                }
+            }));
+        }
+
+        private void OnAgentDisconnected()
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_agent.GaveUp)
+                {
+                    // Restarting an executable that refuses to run just spawns
+                    // processes in a loop; say what is wrong instead.
+                    TxtActivity.Text = "The NomadWiFi engine could not be started.";
+                    ShowEngineUnavailable();
+                    return;
+                }
+
+                TxtActivity.Text = "The NomadWiFi core stopped; restarting it.";
+                _agent.Start();
+            }));
+        }
+
+        private static string ReadStringField(object payload, string field)
+        {
+            var map = payload as Dictionary<string, object>;
+            if (map == null) return null;
+            object value;
+            if (!map.TryGetValue(field, out value) || value == null) return null;
+            return value.ToString();
+        }
+
+        #endregion
+
+        #region System tray
 
         private void SetupSystemTray()
         {
             _notifyIcon = new NotifyIcon
             {
-                Text = "NomadWiFi - Hotel & Travel Wi-Fi Optimizer",
-                Icon = CreateTrayIcon(),
-                Visible = true
+                Text = "NomadWiFi",
+                Icon = Branding.TrayIcon(TrayState.Offline),
+                Visible = true,
             };
 
-            var contextMenu = new ContextMenuStrip();
-            contextMenu.Items.Add("🧭 Open NomadWiFi", null, (s, e) => RestoreFromTray());
-            contextMenu.Items.Add("⚡ Auto-Optimize 5GHz", null, async (s, e) =>
+            var menu = new ContextMenuStrip();
+            menu.Items.Add("Open NomadWiFi", null, (s, e) => RestoreFromTray());
+            menu.Items.Add("Switch to the best access point", null, async (s, e) => await OptimizeAsync());
+
+            _trayMenuAutoRoam = new ToolStripMenuItem("Roam automatically", null,
+                new EventHandler(async (s, e) => await SetAutoRoamAsync(!_isAutoRoamEnabled)))
+            { Checked = _isAutoRoamEnabled };
+            menu.Items.Add(_trayMenuAutoRoam);
+
+            _trayMenuStartup = new ToolStripMenuItem("Start with Windows", null, new EventHandler((s, e) =>
             {
-                await _client.OptimizeAsync();
-                await RefreshStatusAsync();
-            });
+                var enable = !StartupManager.IsStartupEnabled();
+                StartupManager.SetStartup(enable);
+                _trayMenuStartup.Checked = enable;
+                if (ChkStartup != null) ChkStartup.IsChecked = enable;
+            }))
+            { Checked = StartupManager.IsStartupEnabled() };
+            menu.Items.Add(_trayMenuStartup);
 
-            _trayMenuAutoRoam = new ToolStripMenuItem("🛡️ Autonomous Auto-Roam", null, new EventHandler((s, e) =>
-            {
-                _isAutoRoamEnabled = !_isAutoRoamEnabled;
-                _trayMenuAutoRoam.Checked = _isAutoRoamEnabled;
-                if (ChkAutoRoam != null) ChkAutoRoam.IsChecked = _isAutoRoamEnabled;
-            })) { Checked = _isAutoRoamEnabled };
-            contextMenu.Items.Add(_trayMenuAutoRoam);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Quit", null, (s, e) => ExitApplication());
 
-            _trayMenuStartup = new ToolStripMenuItem("🚀 Start with Windows", null, new EventHandler((s, e) =>
-            {
-                var cur = StartupManager.IsStartupEnabled();
-                StartupManager.SetStartup(!cur);
-                _trayMenuStartup.Checked = !cur;
-                if (ChkStartup != null) ChkStartup.IsChecked = !cur;
-            })) { Checked = StartupManager.IsStartupEnabled() };
-            contextMenu.Items.Add(_trayMenuStartup);
-
-            contextMenu.Items.Add(new ToolStripSeparator());
-            contextMenu.Items.Add("❌ Exit Completely", null, (s, e) => ExitApplication());
-
-            _notifyIcon.ContextMenuStrip = contextMenu;
+            _notifyIcon.ContextMenuStrip = menu;
             _notifyIcon.DoubleClick += (s, e) => RestoreFromTray();
         }
 
-        private Icon CreateTrayIcon()
+        /// <summary>Shows connection quality in the tray without opening the window.</summary>
+        private void SetTrayState(TrayState state)
         {
-            using (var bmp = new Bitmap(32, 32))
-            using (var g = Graphics.FromImage(bmp))
-            {
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.Clear(System.Drawing.Color.Transparent);
+            if (_notifyIcon == null || state == _trayState) return;
+            _trayState = state;
+            _notifyIcon.Icon = Branding.TrayIcon(state);
+        }
 
-                // Draw dark rounded circle background
-                using (var bgBrush = new SolidBrush(System.Drawing.Color.FromArgb(22, 27, 34)))
-                {
-                    g.FillEllipse(bgBrush, 1, 1, 30, 30);
-                }
+        private void Notify(string title, string message)
+        {
+            if (_notifyIcon != null) _notifyIcon.ShowBalloonTip(4000, title, message, ToolTipIcon.Info);
+        }
 
-                // Draw emerald accent Wi-Fi arcs
-                using (var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(16, 185, 129), 2.5f))
-                {
-                    g.DrawArc(pen, 5, 5, 22, 22, 210, 120);
-                    g.DrawArc(pen, 9, 9, 14, 14, 210, 120);
-                }
-
-                // Draw center dot
-                using (var dotBrush = new SolidBrush(System.Drawing.Color.FromArgb(16, 185, 129)))
-                {
-                    g.FillEllipse(dotBrush, 13, 20, 6, 6);
-                }
-
-                return System.Drawing.Icon.FromHandle(bmp.GetHicon());
-            }
+        /// <summary>
+        /// Brings the window back from the tray. Public so a second launch can
+        /// surface the instance that is already running instead of starting
+        /// another one.
+        /// </summary>
+        public void PresentToUser()
+        {
+            RestoreFromTray();
         }
 
         private async void RestoreFromTray()
@@ -182,22 +229,15 @@ namespace NomadWiFi.UI
             Show();
             WindowState = WindowState.Normal;
             Activate();
-
-            await RefreshStatusAsync();
-            await RefreshScanAsync();
+            await RefreshAllAsync();
         }
 
         private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
-            if (!_isExiting)
-            {
-                e.Cancel = true;
-                Hide();
-                if (_notifyIcon != null)
-                {
-                    _notifyIcon.ShowBalloonTip(2000, "NomadWiFi Active", "NomadWiFi is still optimizing Wi-Fi in the background.", ToolTipIcon.Info);
-                }
-            }
+            if (_isExiting) return;
+            e.Cancel = true;
+            Hide();
+            Notify("NomadWiFi is still running", "It keeps watching your connection from the system tray.");
         }
 
         private void ExitApplication()
@@ -208,26 +248,19 @@ namespace NomadWiFi.UI
                 _notifyIcon.Visible = false;
                 _notifyIcon.Dispose();
             }
+            _agent.Dispose();
             Application.Current.Shutdown();
         }
 
         #endregion
 
-        #region Custom TitleBar Handlers
+        #region Title bar
 
         private void TitleBar_MouseDown(object sender, MouseButtonEventArgs e)
         {
-            if (e.ChangedButton == MouseButton.Left)
-            {
-                if (e.ClickCount == 2)
-                {
-                    ToggleMaximize();
-                }
-                else
-                {
-                    DragMove();
-                }
-            }
+            if (e.ChangedButton != MouseButton.Left) return;
+            if (e.ClickCount == 2) ToggleMaximize();
+            else DragMove();
         }
 
         private void BtnMinimize_Click(object sender, RoutedEventArgs e)
@@ -245,7 +278,7 @@ namespace NomadWiFi.UI
             if (WindowState == WindowState.Maximized)
             {
                 WindowState = WindowState.Normal;
-                BtnMaximize.Content = "▢";
+                BtnMaximize.Content = "□";
             }
             else
             {
@@ -257,145 +290,150 @@ namespace NomadWiFi.UI
         private void BtnClose_Click(object sender, RoutedEventArgs e)
         {
             Hide();
-            if (_notifyIcon != null)
-            {
-                _notifyIcon.ShowBalloonTip(2000, "NomadWiFi Active", "NomadWiFi is running in your system tray.", ToolTipIcon.Info);
-            }
+            Notify("NomadWiFi is still running", "It keeps watching your connection from the system tray.");
         }
 
         #endregion
 
-        #region Diagnostics & Prominent Offline Handling
+        #region Refresh
+
+        private async Task RefreshAllAsync()
+        {
+            await RefreshStatusAsync();
+            await RefreshScanAsync();
+            await RefreshVpnAsync();
+        }
+
+        /// <summary>
+        /// Shown when the background engine is not answering. It names the
+        /// executable it tried so a wrongly-placed copy is obvious, rather
+        /// than looking like an ordinary loss of Wi-Fi.
+        /// </summary>
+        private void ShowEngineUnavailable()
+        {
+            BorderOfflineBanner.Visibility = Visibility.Visible;
+            BorderCaptivePortal.Visibility = Visibility.Collapsed;
+            TxtOfflineBanner.Text =
+                "The NomadWiFi engine is not running, so nothing below is live. "
+                + "Run the app from a folder that has core\\nomadwifi.exe beside it.";
+
+            TxtSsid.Text = "Engine not running";
+            TxtDetails.Text = string.IsNullOrEmpty(_agent.LastError)
+                ? "Tried: " + _agent.CorePath
+                : _agent.CorePath + " said: " + _agent.LastError;
+            TxtBand.Text = "No engine";
+            TxtBand.Foreground = (Brush)FindResource("AccentRed");
+            BorderBand.Background = Hex("#22F85149");
+            BorderBand.BorderBrush = Hex("#44F85149");
+
+            TxtSignal.Text = "--";
+            TxtSignalSub.Text = "";
+            TxtSpeed.Text = "--";
+            TxtLatency.Text = "--";
+            TxtJitter.Text = "";
+            SetTrayState(TrayState.Offline);
+        }
 
         private async Task RefreshStatusAsync()
         {
-            var status = await _client.GetStatusAsync();
-            if (status == null || !status.connected)
+            var status = await _agent.CallAsync<InterfaceStatus>("status");
+
+            // A silent core is not the same thing as a missing network. Saying
+            // "choose a network below" when the engine never answered sends the
+            // user to a list that cannot possibly work.
+            if (status == null)
             {
-                // Prominent Offline Status Indicator
-                BorderOfflineBanner.Visibility = Visibility.Visible;
-                BorderCaptivePortal.Visibility = Visibility.Collapsed;
-
-                TxtSsid.Text = "Offline (No Connection)";
-                TxtDetails.Text = "Wireless adapter is disconnected • Select a network below to connect";
-
-                BorderBand.Background = (System.Windows.Media.Brush)new BrushConverter().ConvertFrom("#F8514922");
-                BorderBand.BorderBrush = (System.Windows.Media.Brush)new BrushConverter().ConvertFrom("#F8514944");
-                TxtBand.Text = "🔴 Offline";
-                TxtBand.Foreground = (System.Windows.Media.Brush)FindResource("AccentRed");
-
-                TxtSignal.Text = "0 %";
-                TxtSpeed.Text = "0 Mbps";
-                TxtLatency.Text = "-- ms";
-                TxtJitter.Text = "Disconnected";
+                ShowEngineUnavailable();
                 return;
             }
 
-            _lastStatus = status;
+            if (!status.connected)
+            {
+                BorderOfflineBanner.Visibility = Visibility.Visible;
+                TxtOfflineBanner.Text = "Not connected. Choose a network below to get online.";
+                BorderCaptivePortal.Visibility = Visibility.Collapsed;
+
+                TxtSsid.Text = "Not connected";
+                TxtDetails.Text = "Choose a network below to get online.";
+                TxtBand.Text = "Offline";
+                TxtBand.Foreground = (Brush)FindResource("AccentRed");
+                BorderBand.Background = Hex("#22F85149");
+                BorderBand.BorderBrush = Hex("#44F85149");
+
+                TxtSignal.Text = "--";
+                TxtSignalSub.Text = "Signal";
+                TxtSpeed.Text = "--";
+                TxtLatency.Text = "--";
+                TxtJitter.Text = "No connection";
+                SetTrayState(TrayState.Offline);
+                return;
+            }
+
             BorderOfflineBanner.Visibility = Visibility.Collapsed;
 
             TxtSsid.Text = status.ssid;
-            TxtDetails.Text = string.Format("{0} • Channel {1} • {2}", status.radio_type, status.channel, status.bssid);
+            TxtDetails.Text = string.Format("{0}  ·  channel {1}  ·  {2}",
+                string.IsNullOrEmpty(status.radio_type) ? "Wi-Fi" : status.radio_type,
+                status.channel, status.bssid);
 
-            var is5G = status.band != null && (status.band.Contains("5") || status.band.Contains("6"));
-            BorderBand.Background = (System.Windows.Media.Brush)new BrushConverter().ConvertFrom("#10B98122");
-            BorderBand.BorderBrush = (System.Windows.Media.Brush)new BrushConverter().ConvertFrom("#10B98144");
             TxtBand.Text = status.band;
-            TxtBand.Foreground = (System.Windows.Media.Brush)FindResource(is5G ? "AccentGreen" : "AccentYellow");
+            TxtBand.Foreground = (Brush)FindResource(status.IsFastBand ? "AccentBlue" : "AccentYellow");
+            BorderBand.Background = Hex(status.IsFastBand ? "#2258A6FF" : "#22D29922");
+            BorderBand.BorderBrush = Hex(status.IsFastBand ? "#4458A6FF" : "#44D29922");
 
-            TxtSignal.Text = string.Format("{0}%", status.signal_percent);
-            TxtSpeed.Text = string.Format("{0} Mbps", status.rx_mbps);
-            TxtLatency.Text = string.Format("{0:F1} ms", status.gateway_latency_ms);
+            TxtSignal.Text = status.signal_percent + "%";
+            TxtSignalSub.Text = status.rssi != 0 ? status.rssi + " dBm" : "Signal";
+            TxtSpeed.Text = status.rx_mbps + " Mbps";
+            TxtLatency.Text = string.Format("{0:F0} ms", status.gateway_latency_ms);
 
-            // Captive Portal Alert Handling
             if (status.captive_portal)
             {
-                _captivePortalUrl = string.IsNullOrEmpty(status.captive_portal_url) ? "http://neverssl.com" : status.captive_portal_url;
+                _captivePortalUrl = string.IsNullOrEmpty(status.captive_portal_url)
+                    ? "http://neverssl.com" : status.captive_portal_url;
                 BorderCaptivePortal.Visibility = Visibility.Visible;
+                UpdateCaptivePortalAdvice();
             }
             else
             {
                 BorderCaptivePortal.Visibility = Visibility.Collapsed;
             }
 
-            // Update Latency History & Sparkline
+            SetTrayState(TrayStateFor(status));
+
             if (status.gateway_latency_ms > 0)
             {
                 _latencyHistory.Add(status.gateway_latency_ms);
-                if (_latencyHistory.Count > 25)
-                {
-                    _latencyHistory.RemoveAt(0);
-                }
+                if (_latencyHistory.Count > 30) _latencyHistory.RemoveAt(0);
                 UpdateSparkline();
             }
         }
 
-        private void UpdateSparkline()
+        private TrayState TrayStateFor(InterfaceStatus status)
         {
-            if (_latencyHistory.Count < 2) return;
-
-            var w = CanvasSparkline.ActualWidth > 10 ? CanvasSparkline.ActualWidth : 120;
-            var h = CanvasSparkline.ActualHeight > 10 ? CanvasSparkline.ActualHeight : 32;
-
-            var min = _latencyHistory.Min();
-            var max = _latencyHistory.Max();
-            if (Math.Abs(max - min) < 1.0) max = min + 5.0;
-
-            // Calculate Jitter (Mean Absolute Deviation)
-            var avg = _latencyHistory.Average();
-            var jitter = _latencyHistory.Average(v => Math.Abs(v - avg));
-            TxtJitter.Text = string.Format("Jitter: ±{0:F1} ms", jitter);
-
-            var points = new PointCollection();
-            var areaPoints = new PointCollection();
-            areaPoints.Add(new Point(0, h));
-
-            var step = w / (_latencyHistory.Count - 1);
-            for (int i = 0; i < _latencyHistory.Count; i++)
+            if (_vpnStatus != null && _vpnStatus.active != null && status.captive_portal)
             {
-                var val = _latencyHistory[i];
-                var y = h - ((val - min) / (max - min) * (h - 6)) - 3;
-                var x = i * step;
-                var pt = new Point(x, y);
-                points.Add(pt);
-                areaPoints.Add(pt);
+                return TrayState.VpnHeld;
             }
-
-            areaPoints.Add(new Point(w, h));
-
-            PolylineSparkline.Points = points;
-            PolygonSparklineArea.Points = areaPoints;
-
-            // Color coding based on latency health
-            if (avg < 40)
+            if (!status.IsFastBand || status.signal_percent < 40 || status.gateway_latency_ms > 150)
             {
-                PolylineSparkline.Stroke = (System.Windows.Media.Brush)FindResource("AccentGreen");
+                return TrayState.Slow;
             }
-            else if (avg < 120)
-            {
-                PolylineSparkline.Stroke = (System.Windows.Media.Brush)FindResource("AccentYellow");
-            }
-            else
-            {
-                PolylineSparkline.Stroke = (System.Windows.Media.Brush)FindResource("AccentRed");
-            }
+            return TrayState.Good;
         }
 
         private async Task RefreshScanAsync()
         {
             if (_isBusy) return;
             _isBusy = true;
-
             try
             {
-                var aps = await _client.ScanNetworksAsync();
+                var aps = await _agent.CallAsync<List<AccessPoint>>("scan");
+                if (aps == null) return;
+
                 _currentAps = aps;
                 ItemsAccessPoints.ItemsSource = aps;
-                TxtApCount.Text = string.Format("{0} APs in range", aps.Count);
-            }
-            catch (Exception ex)
-            {
-                TxtStatusMsg.Text = string.Format("Scan failed: {0}", ex.Message);
+                TxtApCount.Text = aps.Count == 1 ? "1 network in range"
+                                                 : aps.Count + " networks in range";
             }
             finally
             {
@@ -403,110 +441,151 @@ namespace NomadWiFi.UI
             }
         }
 
-        #endregion
-
-        #region Autonomous Roaming Watchdog
-
-        private async Task RunWatchdogCheckAsync()
+        private async Task RefreshVpnAsync()
         {
-            if (!_isAutoRoamEnabled || _isBusy) return;
+            _vpnStatus = await _agent.CallAsync<VpnStatus>("vpn_status");
 
-            // Enforce minimum 45s cooldown between autonomous switches
-            if ((DateTime.Now - _lastRoamTime).TotalSeconds < 45) return;
-
-            var status = await _client.GetStatusAsync();
-            if (status == null || !status.connected) return;
-
-            bool is24GHz = status.band != null && status.band.Contains("2.4");
-            bool isWeak = status.signal_percent < 40;
-            bool isHighLoss = status.packet_loss_percent > 10.0;
-            bool isHighLatency = status.gateway_latency_ms > 150.0;
-
-            // Only trigger auto-roam if connection is suboptimal
-            if (!is24GHz && !isWeak && !isHighLoss && !isHighLatency) return;
-
-            var aps = await _client.ScanNetworksAsync();
-            var best5G = aps.FirstOrDefault(a => a.Is5GHz && !a.IsLocked && a.signal_percent >= 38);
-
-            if (best5G != null && !string.Equals(best5G.ssid, status.ssid, StringComparison.OrdinalIgnoreCase))
+            if (_vpnStatus == null || _vpnStatus.tunnels == null || _vpnStatus.tunnels.Count == 0)
             {
-                _lastRoamTime = DateTime.Now;
-                var oldSpeed = status.rx_mbps > 0 ? status.rx_mbps : 54;
-                var oldBand = status.band;
-
-                var success = await _client.ConnectAsync(best5G.ssid);
-                if (success)
-                {
-                    var newStatus = await _client.GetStatusAsync();
-                    var newSpeed = newStatus != null ? newStatus.rx_mbps : 351;
-                    var ratio = oldSpeed > 0 ? (double)newSpeed / oldSpeed : 1.0;
-
-                    var msg = string.Format("Auto-Roamed to {0}! Speed: {1} Mbps ({2}) ➔ {3} Mbps ({4}) [{5:F1}x faster]",
-                        best5G.ssid, oldSpeed, oldBand, newSpeed, best5G.band, ratio);
-
-                    TxtRoamCelebrationMsg.Text = msg;
-                    BorderRoamCelebration.Visibility = Visibility.Visible;
-
-                    if (_notifyIcon != null)
-                    {
-                        _notifyIcon.ShowBalloonTip(4000, "⚡ Auto-Roamed to 5 GHz",
-                            string.Format("Switched from {0} to {1} for faster speed & lower latency.", status.ssid, best5G.ssid),
-                            ToolTipIcon.Info);
-                    }
-
-                    await RefreshStatusAsync();
-                    await RefreshScanAsync();
-                }
+                BorderVpn.Visibility = Visibility.Collapsed;
+                return;
             }
+
+            BorderVpn.Visibility = Visibility.Visible;
+            var active = _vpnStatus.active;
+
+            if (active != null)
+            {
+                TxtVpnProvider.Text = active.provider;
+                TxtVpnState.Text = "Carrying all traffic";
+                TxtVpnState.Foreground = (Brush)FindResource("AccentGreen");
+                TxtVpnHint.Text = active.controllable
+                    ? "NomadWiFi pauses and restores this automatically when it switches networks."
+                    : active.control_hint;
+                BtnVpnPause.Visibility = active.controllable ? Visibility.Visible : Visibility.Collapsed;
+            }
+            else
+            {
+                var first = _vpnStatus.tunnels.FirstOrDefault(t => t.up);
+                if (first == null) first = _vpnStatus.tunnels[0];
+
+                TxtVpnProvider.Text = first.provider;
+                TxtVpnState.Text = first.up ? "Connected, not the default route" : "Installed, not connected";
+                TxtVpnState.Foreground = (Brush)FindResource("TextSecondary");
+                TxtVpnHint.Text = "No tunnel is carrying traffic right now.";
+                BtnVpnPause.Visibility = Visibility.Collapsed;
+            }
+
+            UpdateCaptivePortalAdvice();
+        }
+
+        /// <summary>
+        /// A kill switch stops the hotel login page from loading, which is the
+        /// most confusing failure in a hotel. Say so plainly rather than
+        /// letting the browser time out on its own.
+        /// </summary>
+        private void UpdateCaptivePortalAdvice()
+        {
+            if (BorderCaptivePortal.Visibility != Visibility.Visible) return;
+
+            var blocked = _vpnStatus != null && _vpnStatus.active != null;
+            TxtCaptiveMsg.Text = blocked
+                ? "This network needs a web login, but " + _vpnStatus.active.provider +
+                  " is carrying all traffic so the login page cannot load."
+                : "This network needs a web login before you can get online.";
+            BtnPauseVpnAndLogin.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void UpdateSparkline()
+        {
+            if (_latencyHistory.Count < 2) return;
+
+            var w = CanvasSparkline.ActualWidth > 10 ? CanvasSparkline.ActualWidth : 140;
+            var h = CanvasSparkline.ActualHeight > 10 ? CanvasSparkline.ActualHeight : 34;
+
+            var min = _latencyHistory.Min();
+            var max = _latencyHistory.Max();
+            if (Math.Abs(max - min) < 1.0) max = min + 5.0;
+
+            var avg = _latencyHistory.Average();
+            var jitter = _latencyHistory.Average(v => Math.Abs(v - avg));
+            TxtJitter.Text = string.Format("Jitter {0:F0} ms", jitter);
+
+            var line = new PointCollection();
+            var area = new PointCollection();
+            area.Add(new Point(0, h));
+
+            var step = w / (_latencyHistory.Count - 1);
+            for (int i = 0; i < _latencyHistory.Count; i++)
+            {
+                var y = h - ((_latencyHistory[i] - min) / (max - min) * (h - 6)) - 3;
+                var point = new Point(i * step, y);
+                line.Add(point);
+                area.Add(point);
+            }
+            area.Add(new Point(w, h));
+
+            PolylineSparkline.Points = line;
+            PolygonSparklineArea.Points = area;
+
+            string stroke = "AccentBrand";
+            if (avg >= 120) stroke = "AccentRed";
+            else if (avg >= 40) stroke = "AccentYellow";
+            PolylineSparkline.Stroke = (Brush)FindResource(stroke);
+        }
+
+        private static Brush Hex(string value)
+        {
+            return (Brush)new BrushConverter().ConvertFrom(value);
         }
 
         #endregion
 
-        #region Actions & Password Modal Handlers
+        #region Actions
 
         private async void BtnOptimize_Click(object sender, RoutedEventArgs e)
         {
+            await OptimizeAsync();
+        }
+
+        private async Task OptimizeAsync()
+        {
             if (_isBusy) return;
-            _isBusy = true;
             BtnOptimize.IsEnabled = false;
-            TxtStatusMsg.Text = "⚡ Optimizing connection...";
+            TxtStatusMsg.Text = "Looking for a better access point...";
 
             try
             {
-                var oldStatus = _lastStatus;
-                var res = await _client.OptimizeAsync();
-                if (res != null && res.success)
+                var res = await _agent.CallAsync<OptimizationResult>("optimize", null, 120000);
+                if (res == null)
                 {
-                    if (res.switched)
-                    {
-                        TxtStatusMsg.Text = string.Format("🎉 Switched to {0} ({1})!", res.target_ssid, res.band);
-                        if (oldStatus != null)
-                        {
-                            var oldSpeed = oldStatus.rx_mbps > 0 ? oldStatus.rx_mbps : 54;
-                            TxtRoamCelebrationMsg.Text = string.Format("🎉 Optimized to {0}! Speed upgraded from {1} Mbps ({2}) ➔ 5 GHz optimal.", res.target_ssid, oldSpeed, oldStatus.band);
-                            BorderRoamCelebration.Visibility = Visibility.Visible;
-                        }
-                    }
-                    else
-                    {
-                        TxtStatusMsg.Text = "✅ Already on the optimal access point!";
-                    }
+                    TxtStatusMsg.Text = "Could not reach the NomadWiFi core.";
+                    return;
+                }
+
+                if (res.switched)
+                {
+                    TxtStatusMsg.Text = "Connected to " + res.target_ssid + ".";
+                    TxtRoamCelebrationMsg.Text = "Moved to " + res.target_ssid + " (" + res.band + "). " + res.reason;
+                    BorderRoamCelebration.Visibility = Visibility.Visible;
+                }
+                else if (res.rolled_back)
+                {
+                    TxtStatusMsg.Text = res.target_ssid + " could not carry traffic, so your previous network was restored.";
+                }
+                else if (!string.IsNullOrEmpty(res.error))
+                {
+                    TxtStatusMsg.Text = res.error;
                 }
                 else
                 {
-                    TxtStatusMsg.Text = res != null ? res.error : "Optimization complete.";
+                    TxtStatusMsg.Text = "You are already on the best access point in range.";
                 }
 
-                await RefreshStatusAsync();
-                await RefreshScanAsync();
-            }
-            catch (Exception ex)
-            {
-                TxtStatusMsg.Text = string.Format("Error: {0}", ex.Message);
+                await RefreshAllAsync();
             }
             finally
             {
-                _isBusy = false;
                 BtnOptimize.IsEnabled = true;
             }
         }
@@ -519,65 +598,68 @@ namespace NomadWiFi.UI
             var ssid = btn.Tag as string;
             if (string.IsNullOrEmpty(ssid)) return;
 
-            var ap = _currentAps.FirstOrDefault(a => string.Equals(a.ssid, ssid, StringComparison.OrdinalIgnoreCase));
+            var ap = _currentAps.FirstOrDefault(a =>
+                string.Equals(a.ssid, ssid, StringComparison.OrdinalIgnoreCase));
+
             if (ap != null && ap.IsLocked)
             {
-                // Open Password Input Modal Dialog
                 _pendingModalSsid = ssid;
-                TxtModalSsid.Text = "Network: " + ssid;
+                TxtModalSsid.Text = ssid;
                 BoxPassword.Password = "";
-                TxtModalError.Text = "";
                 TxtModalError.Visibility = Visibility.Collapsed;
                 OverlayPasswordModal.Visibility = Visibility.Visible;
                 BoxPassword.Focus();
                 return;
             }
 
-            // Direct Connect for Saved / Inferred / Open networks
-            TxtStatusMsg.Text = string.Format("Connecting to {0}...", ssid);
-            var success = await _client.ConnectAsync(ssid);
-            if (success)
-            {
-                TxtStatusMsg.Text = string.Format("Connected to {0}!", ssid);
-                await RefreshStatusAsync();
-                await RefreshScanAsync();
-            }
-            else
-            {
-                TxtStatusMsg.Text = string.Format("Failed to connect to {0}.", ssid);
-            }
+            TxtStatusMsg.Text = "Connecting to " + ssid + "...";
+            var response = await _agent.CallAsync("connect",
+                new Dictionary<string, object> { { "ssid", ssid } }, 60000);
+
+            TxtStatusMsg.Text = response != null && response.ok
+                ? "Connected to " + ssid + "."
+                : "Could not connect to " + ssid + (response != null && !string.IsNullOrEmpty(response.error)
+                    ? ": " + response.error : ".");
+
+            await RefreshAllAsync();
         }
 
         private async void BtnSavePassword_Click(object sender, RoutedEventArgs e)
         {
-            var pwd = BoxPassword.Password;
-            if (string.IsNullOrEmpty(pwd) || pwd.Length < 8)
+            var password = BoxPassword.Password;
+            if (string.IsNullOrEmpty(password) || password.Length < 8)
             {
-                TxtModalError.Text = "Wi-Fi password must be at least 8 characters.";
+                TxtModalError.Foreground = (Brush)FindResource("AccentRed");
+                TxtModalError.Text = "A Wi-Fi password is at least 8 characters.";
                 TxtModalError.Visibility = Visibility.Visible;
                 return;
             }
 
             BtnSavePassword.IsEnabled = false;
-            TxtModalError.Text = "Authenticating and testing password...";
-            TxtModalError.Foreground = (System.Windows.Media.Brush)FindResource("AccentGreen");
+            TxtModalError.Foreground = (Brush)FindResource("AccentGreen");
+            TxtModalError.Text = "Checking the password...";
             TxtModalError.Visibility = Visibility.Visible;
 
-            var success = await _client.ConnectWithPasswordAsync(_pendingModalSsid, pwd);
+            var response = await _agent.CallAsync("connect", new Dictionary<string, object>
+            {
+                { "ssid", _pendingModalSsid },
+                { "password", password },
+            }, 60000);
+
             BtnSavePassword.IsEnabled = true;
 
-            if (success)
+            if (response != null && response.ok)
             {
                 OverlayPasswordModal.Visibility = Visibility.Collapsed;
-                TxtStatusMsg.Text = string.Format("🎉 Connected to {0}! Network is now saved.", _pendingModalSsid);
-                await RefreshStatusAsync();
-                await RefreshScanAsync();
+                TxtStatusMsg.Text = "Connected to " + _pendingModalSsid + ". The network is saved.";
+                await RefreshAllAsync();
+                return;
             }
-            else
-            {
-                TxtModalError.Foreground = (System.Windows.Media.Brush)FindResource("AccentRed");
-                TxtModalError.Text = "Authentication failed: Incorrect password or connection timed out.";
-            }
+
+            TxtModalError.Foreground = (Brush)FindResource("AccentRed");
+            TxtModalError.Text = response != null && !string.IsNullOrEmpty(response.error)
+                ? response.error
+                : "That password was not accepted.";
         }
 
         private void BtnCancelPassword_Click(object sender, RoutedEventArgs e)
@@ -587,17 +669,41 @@ namespace NomadWiFi.UI
 
         private void BoxPassword_KeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Key == Key.Enter)
-            {
-                BtnSavePassword_Click(sender, e);
-            }
-            else if (e.Key == Key.Escape)
-            {
-                BtnCancelPassword_Click(sender, e);
-            }
+            if (e.Key == Key.Enter) BtnSavePassword_Click(sender, e);
+            else if (e.Key == Key.Escape) BtnCancelPassword_Click(sender, e);
         }
 
         private void BtnOpenCaptive_Click(object sender, RoutedEventArgs e)
+        {
+            OpenPortal();
+        }
+
+        /// <summary>
+        /// Pauses the tunnel, opens the login page, and leaves the VPN for the
+        /// user to resume once they are signed in. This is the manual dance
+        /// that a kill switch otherwise forces on every hotel check-in.
+        /// </summary>
+        private async void BtnPauseVpnAndLogin_Click(object sender, RoutedEventArgs e)
+        {
+            TxtStatusMsg.Text = "Pausing the VPN so the login page can load...";
+            await _agent.CallAsync("vpn_hold", null, 30000);
+            await Task.Delay(1200);
+            OpenPortal();
+            await RefreshAllAsync();
+            TxtStatusMsg.Text = "Sign in, then press Resume VPN.";
+        }
+
+        private async void BtnVpnPause_Click(object sender, RoutedEventArgs e)
+        {
+            var pausing = string.Equals(BtnVpnPause.Content as string, "Pause VPN",
+                StringComparison.OrdinalIgnoreCase);
+
+            await _agent.CallAsync(pausing ? "vpn_hold" : "vpn_resume", null, 30000);
+            BtnVpnPause.Content = pausing ? "Resume VPN" : "Pause VPN";
+            await RefreshVpnAsync();
+        }
+
+        private void OpenPortal()
         {
             try
             {
@@ -605,7 +711,7 @@ namespace NomadWiFi.UI
             }
             catch (Exception ex)
             {
-                TxtStatusMsg.Text = "Could not open browser: " + ex.Message;
+                TxtStatusMsg.Text = "Could not open the browser: " + ex.Message;
             }
         }
 
@@ -614,23 +720,26 @@ namespace NomadWiFi.UI
             BorderRoamCelebration.Visibility = Visibility.Collapsed;
         }
 
-        private void ChkAutoRoam_Click(object sender, RoutedEventArgs e)
+        private async void ChkAutoRoam_Click(object sender, RoutedEventArgs e)
         {
-            _isAutoRoamEnabled = ChkAutoRoam.IsChecked == true;
-            if (_trayMenuAutoRoam != null)
-            {
-                _trayMenuAutoRoam.Checked = _isAutoRoamEnabled;
-            }
+            await SetAutoRoamAsync(ChkAutoRoam.IsChecked == true);
+        }
+
+        private async Task SetAutoRoamAsync(bool enabled)
+        {
+            _isAutoRoamEnabled = enabled;
+            ChkAutoRoam.IsChecked = enabled;
+            if (_trayMenuAutoRoam != null) _trayMenuAutoRoam.Checked = enabled;
+
+            await _agent.CallAsync("set_autoroam",
+                new Dictionary<string, object> { { "enabled", enabled } }, 15000);
         }
 
         private void ChkStartup_Click(object sender, RoutedEventArgs e)
         {
-            bool enable = ChkStartup.IsChecked == true;
+            var enable = ChkStartup.IsChecked == true;
             StartupManager.SetStartup(enable);
-            if (_trayMenuStartup != null)
-            {
-                _trayMenuStartup.Checked = enable;
-            }
+            if (_trayMenuStartup != null) _trayMenuStartup.Checked = enable;
         }
 
         #endregion
