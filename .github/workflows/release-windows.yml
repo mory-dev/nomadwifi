@@ -100,6 +100,10 @@ jobs:
           $v = '${{ steps.version.outputs.value }}'
           Compress-Archive -Path dist\NomadWiFi\* -DestinationPath "dist\NomadWiFi-$v-windows.zip" -Force
           Compress-Archive -Path dist\cli\*      -DestinationPath "dist\nomadwifi-cli-$v-windows.zip" -Force
+          # Version-less copies so /releases/latest/download/<name> is a stable
+          # URL the website can point its download button at.
+          Copy-Item "dist\NomadWiFi-$v-windows.zip"     dist\NomadWiFi-windows.zip     -Force
+          Copy-Item "dist\nomadwifi-cli-$v-windows.zip" dist\nomadwifi-cli-windows.zip -Force
           Get-FileHash dist\*.zip -Algorithm SHA256 |
             ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
             Set-Content dist\SHA256SUMS.txt
