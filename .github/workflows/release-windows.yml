@@ -1,0 +1,127 @@
+name: Release Windows packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and sign nomadwifi.exe
+    runs-on: windows-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The WPF app targets .NET Framework 4.8, so it needs MSBuild rather than
+      # the dotnet SDK. windows-latest ships Visual Studio Build Tools.
+      - uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2.0.0
+
+      # goversioninfo stamps the icon, manifest and version resource into the Go
+      # binary. build.ps1 falls back to the committed .syso without it, but a
+      # release should carry the tag it was cut from.
+      - name: Install goversioninfo
+        run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
+
+      - name: Derive version from the tag
+        id: version
+        shell: bash
+        run: |
+          ref="${{ github.ref_name }}"
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "value=${ref#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=0.0.0-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Builds both executables and runs the test suite. Note: no -Zip here --
+      # the packages have to be archived after signing, not before.
+      - name: Build
+        run: .\build.ps1 -Version "${{ steps.version.outputs.value }}"
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # All three binaries are signed: the app, the engine it spawns, and the
+      # standalone CLI. An unsigned engine beside a signed app still trips
+      # SmartScreen, so signing only the outer exe would defeat the point.
+      - name: Sign executables
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.AZURE_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+          files: |
+            ${{ github.workspace }}\dist\NomadWiFi\nomadwifi.exe
+            ${{ github.workspace }}\dist\NomadWiFi\core\nomadwifi.exe
+            ${{ github.workspace }}\dist\cli\nomadwifi.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify the signatures
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($exe in @(
+            'dist\NomadWiFi\nomadwifi.exe',
+            'dist\NomadWiFi\core\nomadwifi.exe',
+            'dist\cli\nomadwifi.exe')) {
+            $sig = Get-AuthenticodeSignature $exe
+            "{0,-40} {1}  {2}" -f $exe, $sig.Status, $sig.SignerCertificate.Subject
+            if ($sig.Status -ne 'Valid') { $failed = $true }
+          }
+          if ($failed) { throw 'One or more binaries are not validly signed' }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $v = '${{ steps.version.outputs.value }}'
+          Compress-Archive -Path dist\NomadWiFi\* -DestinationPath "dist\NomadWiFi-$v-windows.zip" -Force
+          Compress-Archive -Path dist\cli\*      -DestinationPath "dist\nomadwifi-cli-$v-windows.zip" -Force
+          Get-FileHash dist\*.zip -Algorithm SHA256 |
+            ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
+            Set-Content dist\SHA256SUMS.txt
+          Get-Content dist\SHA256SUMS.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: nomadwifi-windows
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS.txt
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" \
+            || gh release create "${{ github.ref_name }}" --repo "${{ github.repository }}" \
+                 --title "${{ github.ref_name }}" --generate-notes
+          gh release upload "${{ github.ref_name }}" \
+            dist/*.zip dist/SHA256SUMS.txt \
+            --repo "${{ github.repository }}" --clobber
