@@ -22,6 +22,10 @@
 .PARAMETER Installer
     Also build dist/NomadWiFi-Setup-<version>.exe. Requires Inno Setup 6.
 
+.PARAMETER InstallerOnly
+    Build only the installer, reusing the existing dist tree. Used after the
+    binaries have been signed, so signatures are not thrown away.
+
 .PARAMETER Version
     Version to stamp into the binary and the archive names, with or without a
     leading "v". Defaults to the version in this script; release builds pass
@@ -34,6 +38,11 @@ param(
     # Build the Inno Setup installer. Kept opt-in so an ordinary dev build does
     # not need Inno installed.
     [switch]$Installer,
+    # Compile the installer from whatever is already in dist, skipping the
+    # clean and rebuild. The release pipeline needs this because it signs the
+    # binaries between building them and wrapping them in the installer -- a
+    # full rebuild here would discard those signatures.
+    [switch]$InstallerOnly,
     # Release builds pass the pushed tag so the archives and the binary carry
     # the version that was actually shipped.
     [string]$Version
@@ -109,6 +118,11 @@ if (-not $go) {
 }
 if (-not $go) { throw 'Go was not found. Install it from https://go.dev/dl/' }
 
+if ($InstallerOnly) {
+    # Reuse the signed tree exactly as it is; the block below would clean it.
+    $Installer = $true
+} else {
+
 Write-Step 'Cleaning dist'
 if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
 $null = New-Item -ItemType Directory -Path (Join-Path $dist 'NomadWiFi\core') -Force
@@ -180,6 +194,8 @@ if ((Test-Path $app) -and (Test-Path $core)) {
     $coreHash = (Get-FileHash $core).Hash
     if ($appHash -eq $coreHash) { throw 'The app and its core are the same binary' }
     Write-Host '    app and core are distinct binaries' -ForegroundColor Green
+}
+
 }
 
 if ($Zip) {

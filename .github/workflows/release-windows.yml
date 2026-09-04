@@ -94,6 +94,30 @@ jobs:
           }
           if ($failed) { throw 'One or more binaries are not validly signed' }
 
+      # Built after signing, so the payload inside the installer is already
+      # signed. Inno only ever signs the setup wrapper, never its contents.
+      - name: Build the installer
+        run: .\build.ps1 -InstallerOnly -Version "${{ steps.version.outputs.value }}"
+
+      - name: Sign the installer
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.AZURE_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+          files: ${{ github.workspace }}\dist\NomadWiFi-Setup-${{ steps.version.outputs.value }}.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify the installer signature
+        shell: pwsh
+        run: |
+          $setup = "dist\NomadWiFi-Setup-${{ steps.version.outputs.value }}.exe"
+          $sig = Get-AuthenticodeSignature $setup
+          "{0}  {1}  {2}" -f $setup, $sig.Status, $sig.SignerCertificate.Subject
+          if ($sig.Status -ne 'Valid') { throw 'The installer is not validly signed' }
+
       - name: Package
         shell: pwsh
         run: |
@@ -101,10 +125,11 @@ jobs:
           Compress-Archive -Path dist\NomadWiFi\* -DestinationPath "dist\NomadWiFi-$v-windows.zip" -Force
           Compress-Archive -Path dist\cli\*      -DestinationPath "dist\nomadwifi-cli-$v-windows.zip" -Force
           # Version-less copies so /releases/latest/download/<name> is a stable
-          # URL the website can point its download button at.
+          # URL the website and the in-app updater can point at.
+          Copy-Item "dist\NomadWiFi-Setup-$v.exe"       dist\NomadWiFi-Setup.exe       -Force
           Copy-Item "dist\NomadWiFi-$v-windows.zip"     dist\NomadWiFi-windows.zip     -Force
           Copy-Item "dist\nomadwifi-cli-$v-windows.zip" dist\nomadwifi-cli-windows.zip -Force
-          Get-FileHash dist\*.zip -Algorithm SHA256 |
+          Get-FileHash dist\*.zip, dist\*.exe -Algorithm SHA256 |
             ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
             Set-Content dist\SHA256SUMS.txt
           Get-Content dist\SHA256SUMS.txt
@@ -115,6 +140,7 @@ jobs:
           name: nomadwifi-windows
           path: |
             dist/*.zip
+            dist/NomadWiFi-Setup*.exe
             dist/SHA256SUMS.txt
 
       - name: Attach to GitHub Release
@@ -127,5 +153,5 @@ jobs:
             || gh release create "${{ github.ref_name }}" --repo "${{ github.repository }}" \
                  --title "${{ github.ref_name }}" --generate-notes
           gh release upload "${{ github.ref_name }}" \
-            dist/*.zip dist/SHA256SUMS.txt \
+            dist/NomadWiFi-Setup*.exe dist/*.zip dist/SHA256SUMS.txt \
             --repo "${{ github.repository }}" --clobber
