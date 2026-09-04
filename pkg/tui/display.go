@@ -1,10 +1,13 @@
+// Package tui renders NomadWiFi's terminal output.
 package tui
 
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
+	"github.com/dariomory/nomadwifi/pkg/vpn"
 	"github.com/dariomory/nomadwifi/pkg/wifi"
 )
 
@@ -17,107 +20,239 @@ const (
 	ColorPurple = "\033[35m"
 	ColorCyan   = "\033[36m"
 	ColorWhite  = "\033[37m"
+	ColorGrey   = "\033[90m"
 	ColorBold   = "\033[1m"
 )
 
-// PrintBanner prints the NomadWiFi ASCII art header.
+const banner = `  ███╗   ██╗ ██████╗ ███╗   ███╗ █████╗ ██████╗
+  ████╗  ██║██╔═══██╗████╗ ████║██╔══██╗██╔══██╗
+  ██╔██╗ ██║██║   ██║██╔████╔██║███████║██║  ██║
+  ██║╚██╗██║██║   ██║██║╚██╔╝██║██╔══██║██║  ██║
+  ██║ ╚████║╚██████╔╝██║ ╚═╝ ██║██║  ██║██████╔╝
+  ╚═╝  ╚═══╝ ╚═════╝ ╚═╝     ╚═╝╚═╝  ╚═╝╚═════╝`
+
+// PrintBanner prints the NomadWiFi header.
 func PrintBanner() {
-	banner := `
-  _   _                       _ _       ___ _____ _ 
- | \ | | ___  _ __ ___   __ _| | |__   / _ \___  (_)
- |  \| |/ _ \| '_ ' _ \ / _' | | '_ \ / /_\ \ / /| |
- | |\  | (_) | | | | | | (_| | | |_) / /_\\ V /  | |
- |_| \_|\___/|_| |_| |_|\__,_|_|_.__/_/   \_/_/   |_|
-    Automated Hotel & Travel Wi-Fi Roaming Optimizer
-`
-	fmt.Fprintf(os.Stdout, "%s%s%s\n", ColorCyan, banner, ColorReset)
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "%s%s%s%s WIFI%s", ColorCyan, banner, ColorReset, ColorGreen+ColorBold, ColorReset)
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "%s  Wi-Fi roaming and band optimizer for travel networks%s", ColorGrey, ColorReset)
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintln(os.Stdout)
 }
 
-// PrintStatus displays detailed diagnostic status of the active connection.
+// PrintStatus displays the active connection and its measured health.
 func PrintStatus(status *wifi.InterfaceStatus) {
-	fmt.Printf("%s=== Active Wi-Fi Connection ===%s\n", ColorBold, ColorReset)
-	if !status.Connected {
-		fmt.Printf("Status: %sDisconnected%s\n", ColorRed, ColorReset)
+	fmt.Printf("%sConnection%s\n", ColorBold, ColorReset)
+
+	if status == nil || !status.Connected {
+		fmt.Printf("  %sDisconnected%s  no active Wi-Fi association\n\n", ColorRed+ColorBold, ColorReset)
 		return
 	}
 
-	stateColor := ColorGreen
 	bandColor := ColorCyan
 	if status.Band == wifi.Band24GHz {
 		bandColor = ColorYellow
 	}
 
-	fmt.Printf("SSID:            %s%s%s\n", ColorBold+ColorWhite, status.SSID, ColorReset)
-	fmt.Printf("BSSID:           %s\n", status.BSSID)
-	fmt.Printf("Band:            %s%s%s\n", bandColor, status.Band, ColorReset)
-	fmt.Printf("Channel:         %d\n", status.Channel)
-	fmt.Printf("Radio:           %s\n", status.RadioType)
-	fmt.Printf("Signal:          %d%%\n", status.SignalPercent)
-	fmt.Printf("Link Speed:      Rx %d Mbps / Tx %d Mbps\n", status.RxMbps, status.TxMbps)
+	field := func(label, value string) {
+		fmt.Printf("  %s%-16s%s %s\n", ColorGrey, label, ColorReset, value)
+	}
+
+	field("Network", fmt.Sprintf("%s%s%s", ColorBold+ColorWhite, status.SSID, ColorReset))
+	field("Access point", fmt.Sprintf("%s%s", status.BSSID, dim(fmt.Sprintf("  channel %d", status.Channel))))
+	field("Band", fmt.Sprintf("%s%s%s%s", bandColor, status.Band, ColorReset, dim("  "+status.RadioType)))
+	field("Signal", signalBar(status.SignalPercent, status.RSSI))
+	field("Link speed", fmt.Sprintf("%d Mbps down / %d Mbps up", status.RxMbps, status.TxMbps))
 
 	if status.GatewayIP != "" {
-		latColor := ColorGreen
-		if status.GatewayLatencyMs > 100 {
-			latColor = ColorYellow
-		}
-		if status.GatewayLatencyMs > 250 {
-			latColor = ColorRed
-		}
-		fmt.Printf("Gateway:         %s (%s%.1f ms%s, %.0f%% loss)\n",
-			status.GatewayIP, latColor, status.GatewayLatencyMs, ColorReset, status.PacketLossPercent)
+		field("Gateway", fmt.Sprintf("%s   %s   %s",
+			status.GatewayIP,
+			latencyText(status.GatewayLatencyMs),
+			lossText(status.PacketLossPercent)))
 	}
 
 	if status.CaptivePortal {
-		fmt.Printf("Captive Portal:  %sACTION REQUIRED (Login intercepted)%s\n", ColorRed+ColorBold, ColorReset)
+		field("Internet", fmt.Sprintf("%sblocked by a login portal%s", ColorYellow+ColorBold, ColorReset))
+		field("Sign in at", status.CaptivePortalURL)
 	} else {
-		fmt.Printf("Internet Access: %sDirect / Online%s\n", stateColor, ColorReset)
+		field("Internet", fmt.Sprintf("%sreachable%s", ColorGreen, ColorReset))
 	}
 	fmt.Println()
 }
 
-// PrintScanTable outputs the ranked list of discovered access points with auth and pre-warm indicators.
-func PrintScanTable(aps []wifi.AccessPoint, currentBSSID string) {
-	fmt.Printf("%s%-20s | %-7s | %-3s | %-8s | %-6s | %-5s | %-18s%s\n",
-		ColorBold, "SSID", "Band", "Ch", "Radio", "Signal", "Score", "Auth / Hot-Standby", ColorReset)
-	fmt.Println(strings.Repeat("-", 85))
+// PrintVPN shows tunnel state and whether it is carrying traffic.
+func PrintVPN(status vpn.Status) {
+	if len(status.Tunnels) == 0 {
+		return
+	}
+
+	fmt.Printf("%sVPN%s\n", ColorBold, ColorReset)
+	for _, t := range status.Tunnels {
+		state := dim("installed, not connected")
+		if t.Up && t.OwnsDefaultRoute {
+			state = fmt.Sprintf("%scarrying all traffic%s", ColorGreen+ColorBold, ColorReset)
+		} else if t.Up {
+			state = fmt.Sprintf("%sup, not the default route%s", ColorCyan, ColorReset)
+		}
+
+		control := dim("manual control only")
+		if t.Controllable {
+			control = fmt.Sprintf("%sNomadWiFi can pause it%s", ColorGreen, ColorReset)
+		}
+		fmt.Printf("  %s%s%s %s %s\n", ColorGrey, padVisible(t.Provider, 22), ColorReset, padVisible(state, 34), control)
+	}
+	fmt.Println()
+}
+
+// PrintScanTable prints ranked access points.
+func PrintScanTable(aps []wifi.AccessPoint, currentSSID string) {
+	if len(aps) == 0 {
+		fmt.Printf("%sNo networks in range.%s\n\n", ColorYellow, ColorReset)
+		return
+	}
+
+	fmt.Printf("%s  %-24s %-8s %-5s %-10s %-22s %-7s %s%s\n",
+		ColorBold, "NETWORK", "BAND", "CH", "STANDARD", "SIGNAL", "SCORE", "STATUS", ColorReset)
+	fmt.Printf("%s%s%s\n", ColorGrey, strings.Repeat("-", 98), ColorReset)
 
 	for _, ap := range aps {
 		marker := "  "
-		if ap.BSSID == currentBSSID && currentBSSID != "" {
-			marker = "-> "
+		name := truncate(ap.SSID, 24)
+		if strings.EqualFold(ap.SSID, currentSSID) {
+			marker = fmt.Sprintf("%s>%s ", ColorGreen+ColorBold, ColorReset)
+			name = ColorBold + name + ColorReset
 		}
 
-		bandCol := ColorCyan
+		bandColor := ColorCyan
 		if ap.Band == wifi.Band24GHz {
-			bandCol = ColorYellow
+			bandColor = ColorYellow
 		}
 
-		authCol := ColorGreen
-		authStr := "Saved (Ready)"
-		switch ap.AuthStatus {
-		case wifi.AuthStatusSaved:
-			authCol = ColorBold + ColorGreen
-			authStr = "🟢 Saved (Hot)"
-		case wifi.AuthStatusInferred:
-			authCol = ColorBold + ColorPurple
-			authStr = "🟣 Hotel Key (Warmed)"
-		case wifi.AuthStatusOpen:
-			authCol = ColorBold + ColorBlue
-			authStr = "🔵 Open Network"
-		case wifi.AuthStatusLocked:
-			authCol = ColorRed
-			authStr = "🔒 Password Required"
+		radios := ""
+		if ap.BSSIDCount > 1 {
+			radios = dim(fmt.Sprintf(" x%d", ap.BSSIDCount))
 		}
 
-		ssidDisplay := ap.SSID
-		if len(ssidDisplay) > 18 {
-			ssidDisplay = ssidDisplay[:15] + "..."
-		}
-
-		fmt.Printf("%s%-18s | %s%-7s%s | %-3d | %-8s | %3d%%  | %-5.1f | %s%s%s\n",
-			marker, ssidDisplay, bandCol, ap.Band, ColorReset,
-			ap.Channel, ap.RadioType, ap.SignalPercent, ap.QualityScore,
-			authCol, authStr, ColorReset)
+		fmt.Printf("%s%s %s %-5d %-10s %s %s%-7.1f%s %s%s\n",
+			marker, padVisible(name, 24),
+			padVisible(bandColor+string(ap.Band)+ColorReset, 8),
+			ap.Channel,
+			orDash(ap.RadioType),
+			padVisible(signalBar(ap.SignalPercent, ap.RSSI), 22),
+			scoreColor(ap.QualityScore), ap.QualityScore, ColorReset,
+			authLabel(ap), radios)
 	}
 	fmt.Println()
+	fmt.Printf("%s  ready = Windows can connect now   venue key = password inferred from a sibling network%s\n\n",
+		ColorGrey, ColorReset)
+}
+
+func authLabel(ap wifi.AccessPoint) string {
+	switch ap.AuthStatus {
+	case wifi.AuthStatusSaved:
+		return fmt.Sprintf("%sready%s", ColorGreen+ColorBold, ColorReset)
+	case wifi.AuthStatusInferred:
+		if ap.IsWarm {
+			return fmt.Sprintf("%svenue key (warmed)%s", ColorPurple+ColorBold, ColorReset)
+		}
+		return fmt.Sprintf("%svenue key%s", ColorPurple, ColorReset)
+	case wifi.AuthStatusOpen:
+		return fmt.Sprintf("%sopen%s", ColorBlue, ColorReset)
+	default:
+		return fmt.Sprintf("%spassword needed%s", ColorGrey, ColorReset)
+	}
+}
+
+// signalBar renders strength as a short meter plus the measured dBm.
+func signalBar(percent, rssi int) string {
+	const width = 5
+	filled := percent * width / 100
+	if filled > width {
+		filled = width
+	}
+
+	color := ColorGreen
+	switch {
+	case percent < 30:
+		color = ColorRed
+	case percent < 55:
+		color = ColorYellow
+	}
+
+	bar := color + strings.Repeat("#", filled) + ColorGrey + strings.Repeat(".", width-filled) + ColorReset
+	if rssi != 0 {
+		return fmt.Sprintf("%s %3d%% %s", bar, percent, dim(fmt.Sprintf("%d dBm", rssi)))
+	}
+	return fmt.Sprintf("%s %3d%%", bar, percent)
+}
+
+func latencyText(ms float64) string {
+	color := ColorGreen
+	switch {
+	case ms > 250:
+		color = ColorRed
+	case ms > 100:
+		color = ColorYellow
+	}
+	return fmt.Sprintf("%s%.0f ms%s", color, ms, ColorReset)
+}
+
+func lossText(pct float64) string {
+	if pct <= 0 {
+		return dim("no loss")
+	}
+	color := ColorYellow
+	if pct > 10 {
+		color = ColorRed
+	}
+	return fmt.Sprintf("%s%.0f%% loss%s", color, pct, ColorReset)
+}
+
+func scoreColor(score float64) string {
+	switch {
+	case score >= 80:
+		return ColorGreen + ColorBold
+	case score >= 50:
+		return ColorCyan
+	case score >= 0:
+		return ColorYellow
+	}
+	return ColorGrey
+}
+
+func dim(s string) string { return ColorGrey + s + ColorReset }
+
+func orDash(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "-"
+	}
+	return s
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	if n <= 3 {
+		return s[:n]
+	}
+	return s[:n-3] + "..."
+}
+
+// reANSI matches the SGR colour sequences this package emits. They occupy no
+// columns on screen, so padding has to measure the text without them: padding a
+// coloured cell with %-16s counts the escapes and the row loses its alignment.
+var reANSI = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+func visibleWidth(s string) int {
+	return len([]rune(reANSI.ReplaceAllString(s, "")))
+}
+
+// padVisible left-aligns s in a field of the given width, ignoring colour codes.
+func padVisible(s string, width int) string {
+	if gap := width - visibleWidth(s); gap > 0 {
+		return s + strings.Repeat(" ", gap)
+	}
+	return s
 }
