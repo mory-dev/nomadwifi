@@ -39,6 +39,40 @@ $dist = Join-Path $root 'dist'
 
 $version = if ($Version) { $Version.TrimStart('v') } else { '1.2.0' }
 
+# Set-Content -Encoding utf8 emits a BOM on PowerShell 5.1, and goversioninfo
+# refuses to parse a JSON file that starts with one.
+function Write-Utf8NoBom($path, $text) {
+    [System.IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding $false))
+}
+
+# Windows reads file properties out of resources compiled into each binary, and
+# those are declared in two files that would otherwise keep their own hardcoded
+# version. Stamping both from one place is what stops a release shipping
+# binaries whose properties disagree with the tag they were cut from.
+function Set-StampedVersion($ver) {
+    $four = $ver
+    while (($four -split '\.').Count -lt 4) { $four = "$four.0" }
+
+    $viPath = Join-Path $PSScriptRoot 'cmd\nomadwifi\versioninfo.json'
+    $vi = Get-Content $viPath -Raw
+    $parts = $ver -split '\.'
+    $vi = [regex]::Replace($vi, '"Major":\s*\d+', '"Major": ' + $parts[0])
+    $vi = [regex]::Replace($vi, '"Minor":\s*\d+', '"Minor": ' + $parts[1])
+    $vi = [regex]::Replace($vi, '"Patch":\s*\d+', '"Patch": ' + $parts[2])
+    $vi = [regex]::Replace($vi, '"FileVersion":\s*"[\d.]+"', '"FileVersion": "' + $four + '"')
+    $vi = [regex]::Replace($vi, '"ProductVersion":\s*"[\d.]+"', '"ProductVersion": "' + $ver + '"')
+    Write-Utf8NoBom $viPath $vi
+
+    $aiPath = Join-Path $PSScriptRoot 'tools\NomadWiFi.UI\Properties\AssemblyInfo.cs'
+    $ai = Get-Content $aiPath -Raw
+    $ai = [regex]::Replace($ai, 'AssemblyVersion\("[\d.]+"\)', 'AssemblyVersion("' + $four + '")')
+    $ai = [regex]::Replace($ai, 'AssemblyFileVersion\("[\d.]+"\)', 'AssemblyFileVersion("' + $four + '")')
+    $ai = [regex]::Replace($ai, 'AssemblyInformationalVersion\("[^"]+"\)', 'AssemblyInformationalVersion("' + $ver + '")')
+    Write-Utf8NoBom $aiPath $ai
+}
+
+if ($Version) { Set-StampedVersion $version }
+
 function Write-Step($message) {
     Write-Host "==> $message" -ForegroundColor Cyan
 }
