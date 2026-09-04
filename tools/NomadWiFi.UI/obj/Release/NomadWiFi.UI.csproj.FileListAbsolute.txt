@@ -1,7 +1,0 @@
-C:\code\nomadwifi\bin\gui\NomadWiFi-GUI.exe
-C:\code\nomadwifi\tools\NomadWiFi.UI\obj\Release\NomadWiFi.UI.csprojResolveAssemblyReference.cache
-C:\code\nomadwifi\tools\NomadWiFi.UI\obj\Release\MainWindow.baml
-C:\code\nomadwifi\tools\NomadWiFi.UI\obj\Release\MainWindow.g.cs
-C:\code\nomadwifi\tools\NomadWiFi.UI\obj\Release\NomadWiFi-GUI_MarkupCompile.cache
-C:\code\nomadwifi\tools\NomadWiFi.UI\obj\Release\NomadWiFi-GUI.g.resources
-C:\code\nomadwifi\tools\NomadWiFi.UI\obj\Release\NomadWiFi-GUI.exe

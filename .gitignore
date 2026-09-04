@@ -5,6 +5,7 @@
 *.so
 *.dylib
 bin/
+build/
 dist/
 
 # Test binary, built with `go test -c`
@@ -24,3 +25,6 @@ go.work
 
 # sudonotes ideas
 IDEAS.md
+
+# WPF build artifacts
+tools/NomadWiFi.UI/obj/
