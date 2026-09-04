@@ -1,5 +1,5 @@
 using System;
-using System.Reflection;
+using System.Diagnostics;
 using Microsoft.Win32;
 
 namespace NomadWiFi.UI.Services
@@ -35,9 +35,7 @@ namespace NomadWiFi.UI.Services
                     if (key == null) return false;
                     if (enable)
                     {
-                        var exePath = Assembly.GetExecutingAssembly().Location;
-                        var cmd = string.Format("\"{0}\" --minimized", exePath);
-                        key.SetValue(AppName, cmd);
+                        key.SetValue(AppName, CurrentCommand());
                     }
                     else
                     {
@@ -50,6 +48,49 @@ namespace NomadWiFi.UI.Services
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Rewrites an existing startup entry that points somewhere other than
+        /// this executable.
+        ///
+        /// The entry records an absolute path, so moving or renaming the app
+        /// leaves Windows launching a file that is no longer there while the
+        /// checkbox still reads as enabled. Refreshing it on every start keeps
+        /// the two in agreement instead of failing silently at next logon.
+        /// </summary>
+        public static void RefreshStartupPath()
+        {
+            try
+            {
+                using (var key = Registry.CurrentUser.OpenSubKey(RunKey, true))
+                {
+                    if (key == null) return;
+
+                    var existing = key.GetValue(AppName) as string;
+                    if (string.IsNullOrEmpty(existing)) return; // not enabled; nothing to correct
+
+                    var expected = CurrentCommand();
+                    if (!string.Equals(existing, expected, StringComparison.OrdinalIgnoreCase))
+                    {
+                        key.SetValue(AppName, expected);
+                    }
+                }
+            }
+            catch
+            {
+                // Startup registration is a convenience; never block launch on it.
+            }
+        }
+
+        /// <summary>
+        /// MainModule is the actual executable: the assembly location can
+        /// differ once the app is shadow-copied.
+        /// </summary>
+        private static string CurrentCommand()
+        {
+            var exePath = Process.GetCurrentProcess().MainModule.FileName;
+            return string.Format("\"{0}\" --minimized", exePath);
         }
     }
 }
