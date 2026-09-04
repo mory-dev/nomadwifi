@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/mory-dev/nomadwifi/pkg/roam"
+	"github.com/mory-dev/nomadwifi/pkg/state"
+	"github.com/mory-dev/nomadwifi/pkg/update"
 	"github.com/mory-dev/nomadwifi/pkg/vpn"
 	"github.com/mory-dev/nomadwifi/pkg/wifi"
 )
@@ -61,7 +63,7 @@ func runAgent() {
 	}()
 
 	a.push("ready", map[string]interface{}{
-		"version":     Version,
+		"version":     resolveVersion(),
 		"native_wifi": wifi.NativeAvailable(),
 	})
 
@@ -194,9 +196,18 @@ func (a *agent) handle(ctx context.Context, req agentRequest) {
 
 	case "version":
 		a.ok(req.ID, map[string]interface{}{
-			"version":     Version,
+			"version":     resolveVersion(),
 			"native_wifi": wifi.NativeAvailable(),
 		})
+
+	case "check_update":
+		a.handleCheckUpdate(ctx, req)
+
+	case "install_update":
+		a.handleInstallUpdate(ctx, req)
+
+	case "dismiss_update":
+		a.handleDismissUpdate(req)
 
 	case "ping":
 		a.ok(req.ID, map[string]string{"pong": time.Now().Format(time.RFC3339)})
@@ -265,4 +276,80 @@ func boolParam(params map[string]interface{}, key string) bool {
 		return v
 	}
 	return false
+}
+
+// handleCheckUpdate consults the release feed. The GUI calls it on demand and
+// the roam loop calls it on its own schedule, so the throttle lives in
+// pkg/update rather than here.
+func (a *agent) handleCheckUpdate(ctx context.Context, req agentRequest) {
+	current := resolveVersion()
+
+	rel, err := update.Check(ctx, current)
+	if err != nil {
+		a.err(req.ID, "could not check for updates: %v", err)
+		return
+	}
+	if rel == nil {
+		a.ok(req.ID, map[string]interface{}{
+			"current_version":  current,
+			"update_available": false,
+		})
+		return
+	}
+
+	// A version the user already declined is reported but flagged, so the GUI
+	// can stay quiet about it without having to remember the decision itself.
+	a.ok(req.ID, map[string]interface{}{
+		"current_version":  current,
+		"update_available": true,
+		"dismissed":        state.UpdateDismissed() == rel.Version,
+		"release":          rel,
+	})
+}
+
+// handleInstallUpdate downloads the installer, verifies it, and starts it.
+//
+// The GUI is expected to exit shortly after this returns: the installer closes
+// any running copy itself, but exiting first makes the handover visibly clean
+// rather than looking like a crash.
+func (a *agent) handleInstallUpdate(ctx context.Context, req agentRequest) {
+	current := resolveVersion()
+
+	rel, err := update.Check(ctx, current)
+	if err != nil {
+		a.err(req.ID, "could not check for updates: %v", err)
+		return
+	}
+	if rel == nil {
+		a.err(req.ID, "no update is available")
+		return
+	}
+
+	path, err := update.Download(ctx, rel)
+	if err != nil {
+		// Includes the checksum mismatch case, which must never fall through
+		// to executing the file.
+		a.err(req.ID, "download failed: %v", err)
+		return
+	}
+
+	cmd := wifi.SilentCommand(path, "/SILENT", "/NORESTART")
+	if err := cmd.Start(); err != nil {
+		a.err(req.ID, "could not start the installer: %v", err)
+		return
+	}
+
+	a.ok(req.ID, map[string]interface{}{"installing": true, "version": rel.Version})
+}
+
+// dismissUpdate is exposed so the GUI's "not now" is remembered across
+// restarts; otherwise the banner would return on the next launch.
+func (a *agent) handleDismissUpdate(req agentRequest) {
+	version := stringParam(req.Params, "version")
+	if version == "" {
+		a.err(req.ID, "dismiss_update needs a version")
+		return
+	}
+	state.DismissUpdate(version)
+	a.ok(req.ID, map[string]interface{}{"dismissed": version})
 }

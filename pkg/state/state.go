@@ -39,7 +39,13 @@ type State struct {
 	Profiles      map[string]*ProvisionedProfile `json:"profiles"`
 	Penalties     map[string]*Penalty            `json:"penalties"`
 	LastVenue     string                         `json:"last_venue,omitempty"`
-	UpdatedAt     time.Time                      `json:"updated_at"`
+	// LastUpdateCheck throttles the release check. Persisting it means the
+	// check is once a day per machine, not once per launch.
+	LastUpdateCheck time.Time `json:"last_update_check,omitempty"`
+	// UpdateDismissed is the version the user said no to, so the prompt does
+	// not reappear for a release they have already declined.
+	UpdateDismissed string    `json:"update_dismissed,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 var (
@@ -291,6 +297,40 @@ func SetLastVenue(venue string) {
 		return
 	}
 	s.LastVenue = venue
+	save()
+}
+
+// LastUpdateCheck reports when the release feed was last consulted.
+func LastUpdateCheck() time.Time {
+	mu.Lock()
+	defer mu.Unlock()
+	return load().LastUpdateCheck
+}
+
+// MarkUpdateChecked records that the release feed was just consulted, whatever
+// the outcome: a failed check should still back off rather than retry in a loop.
+func MarkUpdateChecked() {
+	mu.Lock()
+	defer mu.Unlock()
+	s := load()
+	s.LastUpdateCheck = time.Now()
+	save()
+}
+
+// UpdateDismissed reports the version the user last declined, if any.
+func UpdateDismissed() string {
+	mu.Lock()
+	defer mu.Unlock()
+	return load().UpdateDismissed
+}
+
+// DismissUpdate silences the prompt for one specific version. A later release
+// still prompts, because the stored version no longer matches.
+func DismissUpdate(version string) {
+	mu.Lock()
+	defer mu.Unlock()
+	s := load()
+	s.UpdateDismissed = version
 	save()
 }
 

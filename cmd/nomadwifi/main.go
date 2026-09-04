@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -15,18 +16,38 @@ import (
 	"github.com/mory-dev/nomadwifi/pkg/roam"
 	"github.com/mory-dev/nomadwifi/pkg/state"
 	"github.com/mory-dev/nomadwifi/pkg/tui"
+	"github.com/mory-dev/nomadwifi/pkg/update"
 	"github.com/mory-dev/nomadwifi/pkg/vpn"
 	"github.com/mory-dev/nomadwifi/pkg/wifi"
 )
 
-// Version is stamped at build time with -ldflags "-X main.Version=...".
-var Version = "1.2.0"
+// Version is stamped by build.ps1 from the VERSION file. It deliberately
+// defaults to "dev" rather than a number: a hardcoded default goes stale, makes
+// an unstamped build claim to be a release it is not, and would have the update
+// check offer that build an "upgrade" to whatever the real latest release is.
+var Version = "dev"
+
+// resolveVersion fills in the version for binaries built without ldflags --
+// notably `go install github.com/mory-dev/nomadwifi/cmd/nomadwifi@latest`,
+// where the module version is recorded in the build info instead.
+func resolveVersion() string {
+	if Version != "dev" && Version != "" {
+		return Version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := strings.TrimPrefix(info.Main.Version, "v"); v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	return "dev"
+}
 
 type flags struct {
 	json     bool
 	all      bool
 	dryRun   bool
 	noVPN    bool
+	install  bool
 	interval int
 	password string
 }
@@ -43,6 +64,8 @@ func parseFlags(args []string) (rest []string, f flags) {
 			f.dryRun = true
 		case "--no-vpn":
 			f.noVPN = true
+		case "--install":
+			f.install = true
 		case "--interval":
 			if i+1 < len(args) {
 				if n, err := strconv.Atoi(args[i+1]); err == nil {
@@ -98,6 +121,8 @@ func main() {
 		runLogs(f)
 	case "agent":
 		runAgent()
+	case "update":
+		runUpdate(f)
 	case "version", "--version", "-v":
 		runVersion(f)
 	case "help", "-h", "--help":
@@ -128,10 +153,10 @@ func emit(v interface{}) {
 
 func runVersion(f flags) {
 	if f.json {
-		emit(map[string]interface{}{"version": Version, "native_wifi": wifi.NativeAvailable()})
+		emit(map[string]interface{}{"version": resolveVersion(), "native_wifi": wifi.NativeAvailable()})
 		return
 	}
-	fmt.Printf("NomadWiFi %s\n", Version)
+	fmt.Printf("NomadWiFi %s\n", resolveVersion())
 	fmt.Printf("Native Wi-Fi API: %v\n", wifi.NativeAvailable())
 	fmt.Printf("State: %s\n", state.Path())
 }
@@ -463,6 +488,7 @@ func printHelp() {
 	fmt.Println("  watch [--interval N]      Monitor continuously and roam automatically")
 	fmt.Println("  vpn [status|hold|resume]  Inspect or coordinate the VPN tunnel")
 	fmt.Println("  warm                      Prepare profiles for instant failover, clean up stale ones")
+	fmt.Println("  update [--install]        Check for a newer release; --install applies it")
 	fmt.Println("  logs                      Show recent activity")
 	fmt.Println("  version                   Print the version")
 	fmt.Println()
@@ -470,6 +496,75 @@ func printHelp() {
 	fmt.Println("  --json                    Machine-readable output, supported by every command")
 	fmt.Println("  --dry-run                 With watch: report what it would do without roaming")
 	fmt.Println("  --no-vpn                  Do not pause or resume the VPN around a roam")
+	fmt.Println("  --install                 With update: download and run the new installer")
 	fmt.Println("  --password <key>          With connect: the network key")
 	fmt.Println("  --interval <seconds>      With watch: how often to measure (default 20)")
+}
+
+// runUpdate reports whether a newer release exists and, with --install, applies
+// it. The install path hands off to the signed installer rather than replacing
+// files itself: the installer already knows how to close a running app, keep
+// the startup entry pointing at the right place, and roll the PATH entry.
+func runUpdate(f flags) {
+	current := resolveVersion()
+	rel, err := update.Check(context.Background(), current)
+	if err != nil {
+		if f.json {
+			emit(map[string]interface{}{"error": err.Error()})
+			return
+		}
+		fail(false, fmt.Sprintf("Could not check for updates: %v", err))
+		return
+	}
+
+	if rel == nil {
+		if f.json {
+			emit(map[string]interface{}{"current_version": current, "update_available": false})
+			return
+		}
+		fmt.Printf("NomadWiFi %s is the latest release.\n", current)
+		return
+	}
+
+	if f.json && !f.install {
+		emit(map[string]interface{}{"current_version": current, "update_available": true, "release": rel})
+		return
+	}
+
+	if !f.install {
+		fmt.Printf("NomadWiFi %s is available; you have %s.\n", rel.Version, rel.CurrentVersion)
+		fmt.Printf("Install it with:  nomadwifi update --install\n")
+		return
+	}
+
+	if !f.json {
+		fmt.Printf("Downloading NomadWiFi %s...\n", rel.Version)
+	}
+	path, err := update.Download(context.Background(), rel)
+	if err != nil {
+		if f.json {
+			emit(map[string]interface{}{"error": err.Error()})
+			return
+		}
+		fail(false, fmt.Sprintf("Download failed: %v", err))
+		return
+	}
+
+	// /SILENT still shows a progress window, which is the right amount of
+	// feedback for something the user explicitly asked for.
+	cmd := wifi.SilentCommand(path, "/SILENT", "/NORESTART")
+	if err := cmd.Start(); err != nil {
+		if f.json {
+			emit(map[string]interface{}{"error": err.Error()})
+			return
+		}
+		fail(false, fmt.Sprintf("Could not start the installer: %v", err))
+		return
+	}
+
+	if f.json {
+		emit(map[string]interface{}{"installing": true, "version": rel.Version, "installer": path})
+		return
+	}
+	fmt.Printf("Installing NomadWiFi %s. This window can be closed.\n", rel.Version)
 }
