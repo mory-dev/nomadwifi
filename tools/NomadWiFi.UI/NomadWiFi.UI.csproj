@@ -6,33 +6,65 @@
     <OutputType>WinExe</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>NomadWiFi.UI</RootNamespace>
-    <AssemblyName>NomadWiFi-GUI</AssemblyName>
+    <!-- The shipped GUI is named nomadwifi.exe. The CLI core it drives keeps
+         the same name in a core\ subfolder, so AgentClient refuses any
+         candidate path equal to this process's own executable. -->
+    <AssemblyName>nomadwifi</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <ProjectTypeGuids>{60dc8134-eba5-43b8-bcc9-bb4bc16c2548};{fae04ec0-301f-11d3-bf4b-00c04f79efbc}</ProjectTypeGuids>
     <WarningLevel>4</WarningLevel>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <StartupObject>NomadWiFi.UI.App</StartupObject>
+    <ApplicationIcon>..\..\assets\nomadwifi.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
     <DebugType>none</DebugType>
     <Optimize>true</Optimize>
-    <OutputPath>..\..\bin\gui\</OutputPath>
+    <OutputPath>..\..\build\gui\</OutputPath>
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="System" />
-    <Reference Include="System.Core" />
-    <Reference Include="System.Drawing" />
-    <Reference Include="System.Windows.Forms" />
-    <Reference Include="System.Xaml" />
-    <Reference Include="System.Web.Extensions" />
-    <Reference Include="WindowsBase" />
-    <Reference Include="PresentationCore" />
-    <Reference Include="PresentationFramework" />
+    <!-- Private=False keeps the framework assemblies out of the output folder;
+         without it System.Web.Extensions drags a 5 MB mscorlib copy along. -->
+    <!-- Without a targeting pack installed, MSBuild resolves mscorlib from the
+         framework directory and treats it as copy-local, dropping a 5 MB copy
+         plus the .nlp tables into the output. Declaring it explicitly as
+         non-private stops that. -->
+    <Reference Include="mscorlib">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="System">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="System.Core">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="System.Drawing">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="System.Windows.Forms">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="System.Xaml">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="System.Web.Extensions">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="WindowsBase">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="PresentationCore">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="PresentationFramework">
+      <Private>False</Private>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Page Include="MainWindow.xaml">
@@ -45,8 +77,15 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="Models\WifiModels.cs" />
-    <Compile Include="Services\NomadCoreClient.cs" />
+    <Compile Include="Services\AgentClient.cs" />
+    <Compile Include="Services\Branding.cs" />
     <Compile Include="Services\StartupManager.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\assets\nomadwifi.ico">
+      <Link>nomadwifi.ico</Link>
+      <LogicalName>NomadWiFi.UI.nomadwifi.ico</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
