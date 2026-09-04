@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/dariomory/nomadwifi/pkg/roam"
-	"github.com/dariomory/nomadwifi/pkg/state"
+	"github.com/mory-dev/nomadwifi/pkg/roam"
+	"github.com/mory-dev/nomadwifi/pkg/state"
 )
 
 // Config re-exports the roaming settings the CLI can adjust.

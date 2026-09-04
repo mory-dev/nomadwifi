@@ -11,12 +11,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dariomory/nomadwifi/pkg/daemon"
-	"github.com/dariomory/nomadwifi/pkg/roam"
-	"github.com/dariomory/nomadwifi/pkg/state"
-	"github.com/dariomory/nomadwifi/pkg/tui"
-	"github.com/dariomory/nomadwifi/pkg/vpn"
-	"github.com/dariomory/nomadwifi/pkg/wifi"
+	"github.com/mory-dev/nomadwifi/pkg/daemon"
+	"github.com/mory-dev/nomadwifi/pkg/roam"
+	"github.com/mory-dev/nomadwifi/pkg/state"
+	"github.com/mory-dev/nomadwifi/pkg/tui"
+	"github.com/mory-dev/nomadwifi/pkg/vpn"
+	"github.com/mory-dev/nomadwifi/pkg/wifi"
 )
 
 // Version is stamped at build time with -ldflags "-X main.Version=...".

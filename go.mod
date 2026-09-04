@@ -1,3 +1,3 @@
-module github.com/dariomory/nomadwifi
+module github.com/mory-dev/nomadwifi
 
 go 1.24

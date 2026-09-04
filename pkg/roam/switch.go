@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dariomory/nomadwifi/pkg/state"
-	"github.com/dariomory/nomadwifi/pkg/vpn"
-	"github.com/dariomory/nomadwifi/pkg/wifi"
+	"github.com/mory-dev/nomadwifi/pkg/state"
+	"github.com/mory-dev/nomadwifi/pkg/vpn"
+	"github.com/mory-dev/nomadwifi/pkg/wifi"
 )
 
 // SwitchResult describes the outcome of a move between access points.

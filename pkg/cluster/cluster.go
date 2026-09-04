@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/dariomory/nomadwifi/pkg/wifi"
+	"github.com/mory-dev/nomadwifi/pkg/wifi"
 )
 
 // Cluster represents a group of related SSIDs and BSSIDs belonging to the same venue/hotel.

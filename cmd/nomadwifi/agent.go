@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dariomory/nomadwifi/pkg/roam"
-	"github.com/dariomory/nomadwifi/pkg/vpn"
-	"github.com/dariomory/nomadwifi/pkg/wifi"
+	"github.com/mory-dev/nomadwifi/pkg/roam"
+	"github.com/mory-dev/nomadwifi/pkg/vpn"
+	"github.com/mory-dev/nomadwifi/pkg/wifi"
 )
 
 // The agent is a long-lived process the GUI talks to over stdin and stdout

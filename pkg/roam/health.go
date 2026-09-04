@@ -3,7 +3,7 @@ package roam
 import (
 	"fmt"
 
-	"github.com/dariomory/nomadwifi/pkg/wifi"
+	"github.com/mory-dev/nomadwifi/pkg/wifi"
 )
 
 // Health is a measured view of the current connection.

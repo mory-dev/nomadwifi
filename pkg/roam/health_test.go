@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dariomory/nomadwifi/pkg/wifi"
+	"github.com/mory-dev/nomadwifi/pkg/wifi"
 )
 
 func healthyBaseline() Health {

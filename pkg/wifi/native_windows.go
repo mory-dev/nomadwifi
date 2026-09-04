@@ -7,7 +7,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/dariomory/nomadwifi/pkg/state"
+	"github.com/mory-dev/nomadwifi/pkg/state"
 )
 
 // EventKind identifies an asynchronous change reported by the wireless service.

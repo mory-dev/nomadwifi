@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dariomory/nomadwifi/pkg/tui"
-	"github.com/dariomory/nomadwifi/pkg/vpn"
-	"github.com/dariomory/nomadwifi/pkg/wifi"
+	"github.com/mory-dev/nomadwifi/pkg/tui"
+	"github.com/mory-dev/nomadwifi/pkg/vpn"
+	"github.com/mory-dev/nomadwifi/pkg/wifi"
 )
 
 func runInteractiveMenu() {

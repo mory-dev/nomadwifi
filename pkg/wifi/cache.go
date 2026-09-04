@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dariomory/nomadwifi/pkg/state"
+	"github.com/mory-dev/nomadwifi/pkg/state"
 )
 
 // The wireless service reports whatever its last scan happened to see, and

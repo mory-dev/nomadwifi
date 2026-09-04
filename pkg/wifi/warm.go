@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dariomory/nomadwifi/pkg/state"
+	"github.com/mory-dev/nomadwifi/pkg/state"
 )
 
 // Warming pre-creates the Windows profile for networks NomadWiFi expects to
