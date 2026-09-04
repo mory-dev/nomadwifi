@@ -19,6 +19,9 @@
 .PARAMETER Zip
     Also produce dist/*.zip archives.
 
+.PARAMETER Installer
+    Also build dist/NomadWiFi-Setup-<version>.exe. Requires Inno Setup 6.
+
 .PARAMETER Version
     Version to stamp into the binary and the archive names, with or without a
     leading "v". Defaults to the version in this script; release builds pass
@@ -28,6 +31,9 @@
 param(
     [switch]$SkipGui,
     [switch]$Zip,
+    # Build the Inno Setup installer. Kept opt-in so an ordinary dev build does
+    # not need Inno installed.
+    [switch]$Installer,
     # Release builds pass the pushed tag so the archives and the binary carry
     # the version that was actually shipped.
     [string]$Version
@@ -182,6 +188,32 @@ if ($Zip) {
         -DestinationPath (Join-Path $dist "NomadWiFi-$version-windows.zip") -Force
     Compress-Archive -Path (Join-Path $dist 'cli\*') `
         -DestinationPath (Join-Path $dist "nomadwifi-cli-$version-windows.zip") -Force
+}
+
+if ($Installer) {
+    Write-Step 'Building the installer'
+    if ($SkipGui) { throw 'The installer needs the desktop app; drop -SkipGui' }
+
+    # Inno Setup 6 is preinstalled on the GitHub windows runners. Locally it may
+    # be a per-user install, which is where winget puts it.
+    $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+    if (-not $iscc) {
+        foreach ($candidate in @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe")) {
+            if (Test-Path $candidate) { $iscc = $candidate; break }
+        }
+    }
+    if (-not $iscc) { throw 'Inno Setup 6 was not found. Install it: winget install JRSoftware.InnoSetup' }
+
+    & $iscc "/DAppVersion=$version" (Join-Path $root 'packaging\nomadwifi.iss') | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
+
+    $setup = Join-Path $dist "NomadWiFi-Setup-$version.exe"
+    if (-not (Test-Path $setup)) { throw "Expected the installer at $setup" }
+    Write-Host ("    {0,-34} {1,8} KB" -f "NomadWiFi-Setup-$version.exe",
+        [math]::Round((Get-Item $setup).Length / 1KB, 1))
 }
 
 Write-Step "Done. Packages are in $dist"
