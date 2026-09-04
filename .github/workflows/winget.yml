@@ -74,6 +74,18 @@ jobs:
             exit 0
           }
 
+          # `wingetcreate update` can only bump a package that already exists in
+          # the community repo, and the first submission is a hand-made PR that
+          # goes through review. Until that lands, skip rather than fail every
+          # release on a package winget has never heard of.
+          $manifests = 'https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/m/mory-dev/NomadWiFi'
+          try {
+            Invoke-WebRequest -Uri $manifests -UseBasicParsing -Method Head | Out-Null
+          } catch {
+            Write-Host '::warning::mory-dev.NomadWiFi is not in winget-pkgs yet. The first submission is a manual PR; skipping.'
+            exit 0
+          }
+
           $v = '${{ steps.version.outputs.value }}'
           $url = "https://github.com/${{ github.repository }}/releases/download/v$v/NomadWiFi-Setup-$v.exe"
 
