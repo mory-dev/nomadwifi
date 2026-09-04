@@ -18,17 +18,26 @@
 
 .PARAMETER Zip
     Also produce dist/*.zip archives.
+
+.PARAMETER Version
+    Version to stamp into the binary and the archive names, with or without a
+    leading "v". Defaults to the version in this script; release builds pass
+    the pushed tag.
 #>
 [CmdletBinding()]
 param(
     [switch]$SkipGui,
-    [switch]$Zip
+    [switch]$Zip,
+    # Release builds pass the pushed tag so the archives and the binary carry
+    # the version that was actually shipped.
+    [string]$Version
 )
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $dist = Join-Path $root 'dist'
-$version = '1.2.0'
+
+$version = if ($Version) { $Version.TrimStart('v') } else { '1.2.0' }
 
 function Write-Step($message) {
     Write-Host "==> $message" -ForegroundColor Cyan
@@ -56,7 +65,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Icon generation failed' }
 # goes stale silently whenever the logo changes -- so refresh it when we can.
 $goversioninfo = Get-Command goversioninfo -ErrorAction SilentlyContinue
 if (-not $goversioninfo) {
-    $candidate = Join-Path $env:USERPROFILE 'goin\goversioninfo.exe'
+    $candidate = Join-Path $env:USERPROFILE 'go\bin\goversioninfo.exe'
     if (Test-Path $candidate) { $goversioninfo = $candidate }
 }
 if ($goversioninfo) {
