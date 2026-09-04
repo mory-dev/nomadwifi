@@ -104,7 +104,9 @@ header.site nav a:hover, header.site nav a[aria-current] { color: var(--text); t
 
 .cta-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .btn {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   padding: 12px 22px;
   border-radius: 10px;
   font-weight: 600;
@@ -113,6 +115,9 @@ header.site nav a:hover, header.site nav a[aria-current] { color: var(--text); t
   transition: transform 0.12s ease, background 0.12s ease;
 }
 .btn:hover { text-decoration: none; transform: translateY(-1px); }
+/* The gap only shows when a button actually carries a glyph, so this is safe
+   for the text-only buttons too. */
+.btn-ico { flex: none; }
 .btn-primary { background: var(--accent); color: #04121F; }
 .btn-primary:hover { background: #3CB4F0; }
 .btn-ghost { border-color: var(--line); color: var(--text); background: var(--card); }
