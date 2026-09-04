@@ -138,16 +138,24 @@ namespace NomadWiFi.UI
             try
             {
                 var self = Process.GetCurrentProcess();
-                var running = Process.GetProcessesByName(self.ProcessName)
-                    .FirstOrDefault(p => p.Id != self.Id && p.MainWindowHandle != IntPtr.Zero);
 
-                // A window-less match is the tray-only case; the handle appears
-                // once it unhides, and the grant below is what lets it come up.
-                if (running == null)
-                {
-                    running = Process.GetProcessesByName(self.ProcessName)
-                        .FirstOrDefault(p => p.Id != self.Id);
-                }
+                // The engine is also called nomadwifi, so matching on the
+                // process name alone can hand foreground rights to the child
+                // process instead of the window we want raised. Compare the
+                // executable path: only another copy of *this* exe qualifies.
+                string selfPath = null;
+                try { selfPath = self.MainModule.FileName; } catch { }
+
+                var siblings = Process.GetProcessesByName(self.ProcessName)
+                    .Where(p => p.Id != self.Id)
+                    .Where(p => selfPath == null || SameExecutable(p, selfPath))
+                    .ToList();
+
+                // Prefer one that already owns a window; a window-less match is
+                // the tray-only case, where the handle appears once it unhides
+                // and the grant below is what lets it come up.
+                var running = siblings.FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero)
+                              ?? siblings.FirstOrDefault();
 
                 if (running != null) AllowSetForegroundWindow(running.Id);
             }
@@ -155,6 +163,21 @@ namespace NomadWiFi.UI
             {
                 // Best effort: without the grant the window still un-hides, it
                 // just may not come to the front.
+            }
+        }
+
+        private static bool SameExecutable(Process candidate, string selfPath)
+        {
+            try
+            {
+                return string.Equals(candidate.MainModule.FileName, selfPath,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                // Access is denied for processes in other sessions; treating
+                // those as non-matches is the safe default.
+                return false;
             }
         }
     }

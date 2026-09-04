@@ -62,7 +62,21 @@ namespace NomadWiFi.UI.Services
         }
 
         /// <summary>
-        /// Finds the core executable.
+        /// Environment variable naming the engine explicitly. Only honoured for
+        /// development: it points the app at a core outside its install tree.
+        /// </summary>
+        private const string CoreOverrideVariable = "NOMADWIFI_CORE";
+
+        /// <summary>
+        /// Finds the core executable, which must live inside the install tree.
+        ///
+        /// Everything here is deliberately restrictive. The engine is spawned as
+        /// a child process, so anywhere it can be picked up from is somewhere an
+        /// executable can be substituted -- and the earlier candidate list
+        /// included a user-writable directory plus a bare-name lookup that fell
+        /// through to the current working directory and PATH. That is how a
+        /// pre-rewrite binary got run and reported a live connection as "not
+        /// connected". Only siblings of this executable are trusted now.
         ///
         /// The GUI and the CLI are both named nomadwifi.exe, so every candidate
         /// is checked against this process's own path: without that guard the
@@ -82,14 +96,18 @@ namespace NomadWiFi.UI.Services
             }
 
             var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            var candidates = new List<string>
+            var candidates = new List<string>();
+
+            // Development escape hatch, checked first so a dev tree can point at
+            // a core built elsewhere. Never set in a shipped install.
+            var overridePath = Environment.GetEnvironmentVariable(CoreOverrideVariable);
+            if (!string.IsNullOrWhiteSpace(overridePath))
             {
-                Path.Combine(baseDir, "core", "nomadwifi.exe"),
-                Path.Combine(baseDir, "..", "cli", "nomadwifi.exe"),
-                Path.Combine(baseDir, "nomadwifi-core.exe"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                             ".local", "bin", "nomadwifi.exe"),
-            };
+                candidates.Add(overridePath);
+            }
+
+            candidates.Add(Path.Combine(baseDir, "core", "nomadwifi.exe"));
+            candidates.Add(Path.Combine(baseDir, "nomadwifi-core.exe"));
 
             foreach (var candidate in candidates)
             {
@@ -105,7 +123,10 @@ namespace NomadWiFi.UI.Services
                 return full;
             }
 
-            return "nomadwifi.exe"; // fall back to PATH
+            // No fallback to PATH. Returning the expected location means a
+            // missing engine surfaces as "engine not running" naming the path
+            // it wanted, rather than silently running whatever was found.
+            return Path.Combine(baseDir, "core", "nomadwifi.exe");
         }
 
         public bool Start()
@@ -124,6 +145,10 @@ namespace NomadWiFi.UI.Services
                     RedirectStandardError = true,
                     UseShellExecute = false,
                     CreateNoWindow = true,
+                    // Pin the working directory to the engine's own folder.
+                    // Left unset it inherits the shortcut's "Start in", which
+                    // leaks into relative path resolution inside the core.
+                    WorkingDirectory = Path.GetDirectoryName(CorePath) ?? string.Empty,
                 };
 
                 _startedUtc = DateTime.UtcNow;

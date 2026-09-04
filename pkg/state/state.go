@@ -48,12 +48,23 @@ var (
 )
 
 // Dir returns the NomadWiFi data directory, creating it if needed.
+//
+// The fallback matters more than it looks: once NomadWiFi is installed rather
+// than unzipped, the working directory is the install tree, which a normal user
+// cannot write to. Falling back to "." would silently attempt to create
+// .nomadwifi inside it and -- since every write error here is swallowed -- lose
+// all learned state without saying anything.
 func Dir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
+	base, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(base) == "" {
+		// LOCALAPPDATA is per-user and always writable when it is set at all.
+		base = os.Getenv("LOCALAPPDATA")
 	}
-	dir := filepath.Join(home, ".nomadwifi")
+	if strings.TrimSpace(base) == "" {
+		base = os.TempDir()
+	}
+
+	dir := filepath.Join(base, ".nomadwifi")
 	_ = os.MkdirAll(dir, 0o755)
 	return dir
 }

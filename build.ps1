@@ -69,6 +69,15 @@ function Set-StampedVersion($ver) {
     $ai = [regex]::Replace($ai, 'AssemblyFileVersion\("[\d.]+"\)', 'AssemblyFileVersion("' + $four + '")')
     $ai = [regex]::Replace($ai, 'AssemblyInformationalVersion\("[^"]+"\)', 'AssemblyInformationalVersion("' + $ver + '")')
     Write-Utf8NoBom $aiPath $ai
+
+    # Both side-by-side manifests carry their own assemblyIdentity version, and
+    # nothing else updates them, so they drift away from the shipped version.
+    foreach ($manifest in @('tools\NomadWiFi.UI\app.manifest', 'cmd\nomadwifi\nomadwifi.manifest')) {
+        $mPath = Join-Path $PSScriptRoot $manifest
+        $m = Get-Content $mPath -Raw
+        $m = [regex]::Replace($m, '(<assemblyIdentity[^>]*?version=")[\d.]+(")', ('${1}' + $four + '${2}'))
+        Write-Utf8NoBom $mPath $m
+    }
 }
 
 if ($Version) { Set-StampedVersion $version }
