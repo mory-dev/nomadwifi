@@ -27,7 +27,7 @@ var suffixPatterns = []*regexp.Regexp{
 // e.g. "BaanNT_2.4G" -> "BaanNT"
 func NormalizeSSID(ssid string) string {
 	clean := strings.TrimSpace(ssid)
-	if clean == "" || clean == "[Hidden SSID]" {
+	if clean == "" || clean == wifi.HiddenSSID {
 		return ""
 	}
 

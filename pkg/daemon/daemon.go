@@ -1,133 +1,60 @@
+// Package daemon runs the roaming engine as a long-lived background monitor
+// with persistent logging.
 package daemon
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/dariomory/nomadwifi/pkg/cluster"
-	"github.com/dariomory/nomadwifi/pkg/wifi"
+	"github.com/dariomory/nomadwifi/pkg/roam"
+	"github.com/dariomory/nomadwifi/pkg/state"
 )
 
-// Config defines daemon monitoring parameters.
+// Config re-exports the roaming settings the CLI can adjust.
 type Config struct {
-	PollInterval    time.Duration
-	MinScoreDelta   float64
-	MinRxMbps       int
-	MaxLatencyMs    float64
-	MaxPacketLoss   float64
-	AutoRoam        bool
-	Prefer5GHz      bool
-	CooldownPeriod  time.Duration
+	PollInterval time.Duration
+	AutoRoam     bool
+	ManageVPN    bool
+	Quiet        bool
 }
 
-// DefaultConfig returns optimal defaults for nomad hotel travel.
+// DefaultConfig returns the defaults used by "nomadwifi watch".
 func DefaultConfig() Config {
+	base := roam.DefaultConfig()
 	return Config{
-		PollInterval:   20 * time.Second,
-		MinScoreDelta:  15.0,
-		MinRxMbps:      50,
-		MaxLatencyMs:   150.0,
-		MaxPacketLoss:  10.0,
-		AutoRoam:       true,
-		Prefer5GHz:     true,
-		CooldownPeriod: 45 * time.Second,
+		PollInterval: base.PollInterval,
+		AutoRoam:     base.AutoRoam,
+		ManageVPN:    base.ManageVPN,
 	}
 }
 
 // GetLogPath returns the path to the persistent NomadWiFi log file.
 func GetLogPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
-	dir := filepath.Join(home, ".nomadwifi")
-	_ = os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, "nomadwifi.log")
+	return filepath.Join(state.Dir(), "nomadwifi.log")
 }
 
-// StartMonitor runs the background monitoring loop with dual logging (console + file).
+// StartMonitor runs the roaming engine until the context is cancelled,
+// logging to both the console and the log file.
 func StartMonitor(ctx context.Context, cfg Config) error {
-	logPath := GetLogPath()
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err == nil {
+	logger := log.New(os.Stdout, "", log.LstdFlags)
+
+	if f, err := os.OpenFile(GetLogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
 		defer f.Close()
-		log.SetOutput(io.MultiWriter(os.Stdout, f))
-	}
-
-	log.Printf("[NomadWiFi] Logging to %s\n", logPath)
-	log.Printf("[NomadWiFi] Monitoring active Wi-Fi every %v (AutoRoam: %v, Prefer5GHz: %v)\n",
-		cfg.PollInterval, cfg.AutoRoam, cfg.Prefer5GHz)
-
-	ticker := time.NewTicker(cfg.PollInterval)
-	defer ticker.Stop()
-
-	var lastRoamTime time.Time
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("[NomadWiFi] Daemon stopped.")
-			return nil
-		case <-ticker.C:
-			status, err := wifi.GetInterfaceStatus()
-			if err != nil || !status.Connected {
-				continue
-			}
-
-			// Check if we are in cooldown
-			if time.Since(lastRoamTime) < cfg.CooldownPeriod {
-				continue
-			}
-
-			// Evaluate if current connection is degraded
-			degraded := false
-			degradedReason := ""
-
-			if cfg.Prefer5GHz && status.Band == wifi.Band24GHz {
-				degraded = true
-				degradedReason = "Connected on 2.4 GHz band instead of 5 GHz"
-			} else if status.RxMbps > 0 && status.RxMbps < cfg.MinRxMbps {
-				degraded = true
-				degradedReason = fmt.Sprintf("Low link speed (%d Mbps < %d Mbps)", status.RxMbps, cfg.MinRxMbps)
-			} else if status.PacketLossPercent > cfg.MaxPacketLoss {
-				degraded = true
-				degradedReason = fmt.Sprintf("High packet loss (%.1f%% > %.1f%%)", status.PacketLossPercent, cfg.MaxPacketLoss)
-			} else if status.GatewayLatencyMs > cfg.MaxLatencyMs {
-				degraded = true
-				degradedReason = fmt.Sprintf("High gateway latency (%.1fms > %.1fms)", status.GatewayLatencyMs, cfg.MaxLatencyMs)
-			}
-
-			if !degraded {
-				continue
-			}
-
-			// Scan for alternatives
-			aps, err := wifi.ScanNetworks()
-			if err != nil || len(aps) == 0 {
-				continue
-			}
-
-			betterAP, reason := cluster.FindAlternativeInCluster(status.SSID, aps, cfg.MinScoreDelta)
-			if betterAP != nil {
-				log.Printf("[NomadWiFi] Degraded condition: %s\n", degradedReason)
-				log.Printf("[NomadWiFi] Found better AP: %s (%s, Score: %.1f) - Reason: %s\n",
-					betterAP.SSID, betterAP.Band, betterAP.QualityScore, reason)
-
-				if cfg.AutoRoam {
-					log.Printf("[NomadWiFi] Roaming to %s...\n", betterAP.SSID)
-					if err := wifi.ConnectSSID(betterAP.SSID); err != nil {
-						log.Printf("[NomadWiFi] Roaming failed: %v\n", err)
-					} else {
-						log.Printf("[NomadWiFi] Successfully roamed to %s!\n", betterAP.SSID)
-						lastRoamTime = time.Now()
-					}
-				}
-			}
+		if cfg.Quiet {
+			logger.SetOutput(f)
+		} else {
+			logger.SetOutput(io.MultiWriter(os.Stdout, f))
 		}
 	}
+
+	engineCfg := roam.DefaultConfig()
+	engineCfg.PollInterval = cfg.PollInterval
+	engineCfg.AutoRoam = cfg.AutoRoam
+	engineCfg.ManageVPN = cfg.ManageVPN
+
+	return roam.New(engineCfg, logger.Printf).Run(ctx)
 }
