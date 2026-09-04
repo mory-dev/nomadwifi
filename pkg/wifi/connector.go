@@ -7,25 +7,36 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
-// GetInterfaceStatus returns current Wi-Fi adapter connection state and diagnostics.
-func GetInterfaceStatus() (*InterfaceStatus, error) {
+var reInterfaceField = regexp.MustCompile(`^\s*([^:]+?)\s*:\s*(.*)$`)
+
+// GetLinkStatus returns adapter and association state only. It performs no
+// network probes, so it is cheap enough to call on a tight loop; use
+// GetInterfaceStatus when gateway latency and captive-portal state are needed.
+func GetLinkStatus() (*InterfaceStatus, error) {
+	if NativeAvailable() {
+		if s, err := nativeLinkStatus(); err == nil {
+			return s, nil
+		}
+	}
+
 	cmd := SilentCommand("netsh", "wlan", "show", "interfaces")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}
+	return parseInterfaceStatus(out), nil
+}
 
+func parseInterfaceStatus(out []byte) *InterfaceStatus {
 	status := &InterfaceStatus{}
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 
-	reField := regexp.MustCompile(`^\s*([^:]+)\s*:\s*(.*)$`)
-
 	for scanner.Scan() {
-		line := scanner.Text()
-		m := reField.FindStringSubmatch(line)
+		m := reInterfaceField.FindStringSubmatch(scanner.Text())
 		if len(m) <= 2 {
 			continue
 		}
@@ -44,13 +55,7 @@ func GetInterfaceStatus() (*InterfaceStatus, error) {
 		case "AP BSSID", "BSSID":
 			status.BSSID = val
 		case "Band":
-			if strings.Contains(val, "5") {
-				status.Band = Band5GHz
-			} else if strings.Contains(val, "6") {
-				status.Band = Band6GHz
-			} else {
-				status.Band = Band24GHz
-			}
+			status.Band = bandFromLabel(val)
 		case "Channel":
 			if ch, err := strconv.Atoi(val); err == nil {
 				status.Channel = ch
@@ -58,104 +63,211 @@ func GetInterfaceStatus() (*InterfaceStatus, error) {
 		case "Radio type":
 			status.RadioType = val
 		case "Receive rate (Mbps)":
-			if r, err := strconv.Atoi(val); err == nil {
-				status.RxMbps = r
-			}
+			status.RxMbps = parseRateMbps(val)
 		case "Transmit rate (Mbps)":
-			if t, err := strconv.Atoi(val); err == nil {
-				status.TxMbps = t
-			}
+			status.TxMbps = parseRateMbps(val)
 		case "Signal":
-			clean := strings.TrimSuffix(val, "%")
-			if s, err := strconv.Atoi(strings.TrimSpace(clean)); err == nil {
+			if s, err := strconv.Atoi(strings.TrimSpace(strings.TrimSuffix(val, "%"))); err == nil {
 				status.SignalPercent = s
+			}
+		case "Rssi":
+			if r, err := strconv.Atoi(val); err == nil {
+				status.RSSI = r
 			}
 		}
 	}
 
+	if status.RSSI == 0 && status.SignalPercent > 0 {
+		status.RSSI = rssiFromSignalPercent(status.SignalPercent)
+	}
+	if status.Band == "" || status.Band == BandOther {
+		status.Band = bandFromChannel(status.Channel)
+	}
+	return status
+}
+
+// parseRateMbps handles rates reported as "390" and as "390.5".
+func parseRateMbps(val string) int {
+	f, err := strconv.ParseFloat(strings.TrimSpace(val), 64)
+	if err != nil {
+		return 0
+	}
+	return int(f)
+}
+
+var (
+	ssidCacheMu    sync.Mutex
+	ssidCacheVal   string
+	ssidCacheStamp time.Time
+)
+
+const ssidCacheTTL = 3 * time.Second
+
+// CurrentSSID returns the SSID we are associated with, cached briefly so that
+// classifying a full scan does not re-query the adapter once per access point.
+func CurrentSSID() string {
+	ssidCacheMu.Lock()
+	if time.Since(ssidCacheStamp) < ssidCacheTTL {
+		v := ssidCacheVal
+		ssidCacheMu.Unlock()
+		return v
+	}
+	ssidCacheMu.Unlock()
+
+	ssid := ""
+	if s, err := GetLinkStatus(); err == nil && s != nil && s.Connected {
+		ssid = s.SSID
+	}
+
+	ssidCacheMu.Lock()
+	ssidCacheVal = ssid
+	ssidCacheStamp = time.Now()
+	ssidCacheMu.Unlock()
+	return ssid
+}
+
+// GetInterfaceStatus returns connection state plus measured link health.
+func GetInterfaceStatus() (*InterfaceStatus, error) {
+	status, err := GetLinkStatus()
+	if err != nil {
+		return nil, err
+	}
+
 	if status.Connected {
-		status.GatewayIP = GetDefaultGateway()
-		if status.GatewayIP != "" {
-			status.GatewayLatencyMs, status.PacketLossPercent = PingGateway(status.GatewayIP)
+		gw, local := interfaceIPv4Config(status.InterfaceName)
+		status.GatewayIP = gw
+		if gw != "" {
+			r := ProbeGatewayFrom(gw, local, 3)
+			status.GatewayLatencyMs = r.AvgMs
+			status.PacketLossPercent = r.LossPct
 		}
-		status.CaptivePortal, status.CaptivePortalURL = CheckCaptivePortal()
+		status.CaptivePortal, status.CaptivePortalURL = CheckCaptivePortalFrom(local)
 	}
 
 	return status, nil
 }
 
-// ConnectSSID initiates connection to an SSID, auto-provisioning Wi-Fi profiles from hotel passwords if needed.
-func ConnectSSID(ssid string) error {
-	newlyProvisioned := false
+// findAP locates a scanned access point by SSID, best-scoring BSSID first.
+func findAP(ssid string) *AccessPoint {
+	aps, err := ScanNetworks()
+	if err != nil {
+		return nil
+	}
+	for i := range aps {
+		if strings.EqualFold(aps[i].SSID, ssid) {
+			return &aps[i]
+		}
+	}
+	return nil
+}
 
-	// If profile does not exist, attempt hotel password guessing and profile synthesis
-	if !HasProfile(ssid) {
+// ConnectSSID associates with an SSID, provisioning a profile first if needed.
+//
+// Open networks need a profile too, and it must be an open-security profile:
+// synthesizing a WPA2 template for them (or refusing them for having no
+// password) is why open hotel networks could not be joined at all.
+func ConnectSSID(ssid string) error {
+	if HasProfile(ssid) {
+		return associate(ssid, false)
+	}
+
+	ap := findAP(ssid)
+	if ap == nil {
+		return fmt.Errorf("network '%s' is not in range", ssid)
+	}
+
+	security := SecurityForNetwork(ap.Authentication, ap.Cipher)
+	if !security.SupportsAutoProfile() {
+		return fmt.Errorf("'%s' is an enterprise network and needs manual setup in Windows", ssid)
+	}
+
+	password := ""
+	if security.NeedsPassword() {
 		pwd, source := GuessPasswordForSSID(ssid)
-		if pwd != "" {
-			if err := AddWifiProfile(ssid, pwd); err != nil {
-				return fmt.Errorf("failed to auto-provision profile with password from %s: %w", source, err)
-			}
-			newlyProvisioned = true
-		} else {
+		if pwd == "" {
 			return fmt.Errorf("no known or inferable password for network '%s'", ssid)
 		}
+		password = pwd
+		_ = source
 	}
 
+	if err := AddWifiProfileFor(ssid, password, security, ap.IsHidden()); err != nil {
+		return fmt.Errorf("failed to provision profile for '%s': %w", ssid, err)
+	}
+
+	return associate(ssid, true)
+}
+
+// ConnectSSIDWithPassword registers a user-supplied key and connects. A profile
+// created here is removed again if the handshake fails, so a wrong password
+// never leaves a broken profile behind.
+func ConnectSSIDWithPassword(ssid, password string) error {
+	security := SecurityWPA2PSK
+	hidden := false
+	if ap := findAP(ssid); ap != nil {
+		security = SecurityForNetwork(ap.Authentication, ap.Cipher)
+		hidden = ap.IsHidden()
+	}
+	if !security.NeedsPassword() {
+		security = SecurityWPA2PSK
+	}
+
+	if err := AddWifiProfileFor(ssid, password, security, hidden); err != nil {
+		return fmt.Errorf("failed to configure network profile: %w", err)
+	}
+	return associate(ssid, true)
+}
+
+// associate issues the connect and waits for the adapter to report the SSID.
+// rollback removes a profile this call created when the handshake never completes.
+func associate(ssid string, rollback bool) error {
 	cmd := SilentCommand("netsh", "wlan", "connect", fmt.Sprintf("name=%s", ssid))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if newlyProvisioned {
+	if out, err := cmd.CombinedOutput(); err != nil {
+		if rollback {
 			_ = DeleteWifiProfile(ssid)
 		}
-		return fmt.Errorf("connection failed: %w (output: %s)", err, string(out))
+		NoteAssociationFailure(ssid, "connect command rejected")
+		return fmt.Errorf("connection failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
 
-	// Poll interface for up to 4 seconds to verify connection
-	for i := 0; i < 8; i++ {
-		time.Sleep(500 * time.Millisecond)
-		status, err := GetInterfaceStatus()
-		if err == nil && status != nil && status.Connected && strings.EqualFold(status.SSID, ssid) {
-			return nil
-		}
+	if WaitForAssociation(ssid, 12*time.Second) {
+		NoteAssociationSuccess(ssid)
+		InvalidateNetworkCaches()
+		return nil
 	}
 
-	// If handshake failed to connect within timeout and it was newly provisioned, clean it up!
-	if newlyProvisioned {
+	if rollback {
 		_ = DeleteWifiProfile(ssid)
 	}
-
+	NoteAssociationFailure(ssid, "association timed out")
 	return fmt.Errorf("authentication or connection timed out for '%s'", ssid)
 }
 
-// ConnectSSIDWithPassword registers a user-entered password and establishes connection.
-// If the connection fails, the temporary profile is immediately deleted to keep profiles clean.
-func ConnectSSIDWithPassword(ssid, password string) error {
-	if err := AddWifiProfile(ssid, password); err != nil {
-		return fmt.Errorf("failed to configure network profile: %w", err)
-	}
-
-	cmd := SilentCommand("netsh", "wlan", "connect", fmt.Sprintf("name=%s", ssid))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		_ = DeleteWifiProfile(ssid)
-		return fmt.Errorf("connection failed: %w (output: %s)", err, string(out))
-	}
-
-	// Poll interface for up to 5 seconds to verify connection
-	for i := 0; i < 10; i++ {
-		time.Sleep(500 * time.Millisecond)
-		status, err := GetInterfaceStatus()
+// WaitForAssociation blocks until the adapter reports the given SSID, or the
+// deadline passes.
+func WaitForAssociation(ssid string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(400 * time.Millisecond)
+		status, err := GetLinkStatus()
 		if err == nil && status != nil && status.Connected && strings.EqualFold(status.SSID, ssid) {
-			return nil
+			invalidateSSIDCache()
+			return true
 		}
 	}
-
-	_ = DeleteWifiProfile(ssid)
-	return fmt.Errorf("authentication failed: incorrect password or connection timed out")
+	return false
 }
 
-// Disconnect disconnects the active Wi-Fi connection.
+func invalidateSSIDCache() {
+	ssidCacheMu.Lock()
+	ssidCacheStamp = time.Time{}
+	ssidCacheMu.Unlock()
+}
+
+// Disconnect drops the active Wi-Fi association.
 func Disconnect() error {
 	cmd := SilentCommand("netsh", "wlan", "disconnect")
-	return cmd.Run()
+	err := cmd.Run()
+	invalidateSSIDCache()
+	return err
 }
