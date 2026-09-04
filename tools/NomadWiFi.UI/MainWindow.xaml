@@ -216,18 +216,45 @@
                 </Border>
 
                 <!-- Roam notice -->
-                <Border x:Name="BorderRoamCelebration" Grid.Row="2" Visibility="Collapsed"
-                        Background="#2210B981" BorderBrush="#10B981" BorderThickness="1"
-                        CornerRadius="10" Padding="14,10" Margin="0,0,0,10">
-                    <Grid>
-                        <TextBlock x:Name="TxtRoamCelebrationMsg" TextWrapping="Wrap"
-                                   Text="Moved to a faster access point."
-                                   FontWeight="SemiBold" Foreground="{StaticResource AccentGreen}"
-                                   FontSize="12" VerticalAlignment="Center" Margin="0,0,30,0" />
-                        <Button Content="✕" Style="{StaticResource CaptionBtn}" Width="24" Height="24"
-                                HorizontalAlignment="Right" Click="BtnDismissCelebration_Click" />
-                    </Grid>
-                </Border>
+                <!-- Both notices share one grid row via a StackPanel; the outer
+                     grid has fixed row indices and adding a row would renumber
+                     everything below it. -->
+                <StackPanel Grid.Row="2">
+                    <Border x:Name="BorderRoamCelebration" Visibility="Collapsed"
+                            Background="#2210B981" BorderBrush="#10B981" BorderThickness="1"
+                            CornerRadius="10" Padding="14,10" Margin="0,0,0,10">
+                        <Grid>
+                            <TextBlock x:Name="TxtRoamCelebrationMsg" TextWrapping="Wrap"
+                                       Text="Moved to a faster access point."
+                                       FontWeight="SemiBold" Foreground="{StaticResource AccentGreen}"
+                                       FontSize="12" VerticalAlignment="Center" Margin="0,0,30,0" />
+                            <Button Content="✕" Style="{StaticResource CaptionBtn}" Width="24" Height="24"
+                                    HorizontalAlignment="Right" Click="BtnDismissCelebration_Click" />
+                        </Grid>
+                    </Border>
+
+                    <Border x:Name="BorderUpdate" Visibility="Collapsed"
+                            Background="#22189CF0" BorderBrush="#189CF0" BorderThickness="1"
+                            CornerRadius="10" Padding="14,10" Margin="0,0,0,10">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="TxtUpdateMsg" Grid.Column="0" TextWrapping="Wrap"
+                                       Text="A new version is available."
+                                       FontWeight="SemiBold" Foreground="{StaticResource AccentBrand}"
+                                       FontSize="12" VerticalAlignment="Center" Margin="0,0,12,0" />
+                            <Button x:Name="BtnInstallUpdate" Grid.Column="1" Content="Install now"
+                                    Style="{StaticResource SecondaryBtn}" Padding="12,5" FontSize="11"
+                                    VerticalAlignment="Center" Click="BtnInstallUpdate_Click" />
+                            <Button Grid.Column="2" Content="✕" Style="{StaticResource CaptionBtn}"
+                                    Width="24" Height="24" Margin="6,0,0,0"
+                                    Click="BtnDismissUpdate_Click" />
+                        </Grid>
+                    </Border>
+                </StackPanel>
 
                 <!-- Current connection -->
                 <Border Grid.Row="3" Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}"

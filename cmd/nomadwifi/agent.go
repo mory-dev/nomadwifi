@@ -76,7 +76,10 @@ func runAgent() {
 	var inFlight sync.WaitGroup
 
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		// Strip a UTF-8 BOM: some clients (PowerShell's pipeline among them)
+		// prefix one, and json.Unmarshal rejects it with an error that gives
+		// no hint about what is actually wrong.
+		line := strings.TrimSpace(strings.TrimPrefix(scanner.Text(), "\ufeff"))
 		if line == "" {
 			continue
 		}

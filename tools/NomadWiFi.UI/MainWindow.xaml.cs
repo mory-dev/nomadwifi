@@ -72,6 +72,7 @@ namespace NomadWiFi.UI
                 FitToWorkArea();
                 if (startMinimized) { Hide(); return; }
                 await RefreshAllAsync();
+                await CheckForUpdateAsync();
             };
 
             Activated += async (s, e) =>
@@ -160,6 +161,22 @@ namespace NomadWiFi.UI
             object value;
             if (!map.TryGetValue(field, out value) || value == null) return null;
             return value.ToString();
+        }
+
+        private static object ReadField(object payload, string field)
+        {
+            var map = payload as Dictionary<string, object>;
+            if (map == null) return null;
+            object value;
+            return map.TryGetValue(field, out value) ? value : null;
+        }
+
+        private static bool ReadBoolField(object payload, string field)
+        {
+            var value = ReadField(payload, field);
+            if (value is bool) return (bool)value;
+            bool parsed;
+            return value != null && bool.TryParse(value.ToString(), out parsed) && parsed;
         }
 
         #endregion
@@ -719,6 +736,74 @@ namespace NomadWiFi.UI
         {
             BorderRoamCelebration.Visibility = Visibility.Collapsed;
         }
+
+        #region Updates
+
+        private string _availableUpdate;
+
+        /// <summary>
+        /// Asks the core whether a newer release exists. The core throttles the
+        /// actual network call to once a day, so calling this on every launch
+        /// costs nothing.
+        /// </summary>
+        private async Task CheckForUpdateAsync()
+        {
+            var result = await _agent.CallRawAsync("check_update");
+            if (result == null) return;
+
+            if (!ReadBoolField(result, "update_available")) return;
+            // A version the user already dismissed stays dismissed.
+            if (ReadBoolField(result, "dismissed")) return;
+
+            var release = ReadField(result, "release") as Dictionary<string, object>;
+            if (release == null) return;
+
+            var version = ReadStringField(release, "version");
+            if (string.IsNullOrEmpty(version)) return;
+
+            _availableUpdate = version;
+            TxtUpdateMsg.Text = string.Format(
+                "NomadWiFi {0} is available. You have {1}.",
+                version, ReadStringField(result, "current_version"));
+            BorderUpdate.Visibility = Visibility.Visible;
+        }
+
+        private async void BtnInstallUpdate_Click(object sender, RoutedEventArgs e)
+        {
+            BtnInstallUpdate.IsEnabled = false;
+            TxtUpdateMsg.Text = "Downloading the update...";
+
+            // The core verifies the download against the published checksum and
+            // refuses to run it on a mismatch, so a failure here is safe.
+            var result = await _agent.CallRawAsync("install_update");
+            if (result == null)
+            {
+                TxtUpdateMsg.Text = "The update could not be installed. Try again later.";
+                BtnInstallUpdate.IsEnabled = true;
+                return;
+            }
+
+            // The installer closes this app to replace its files and puts it
+            // back afterwards, so exiting now makes the handover look clean
+            // rather than like a crash.
+            TxtUpdateMsg.Text = "Installing. NomadWiFi will restart.";
+            await Task.Delay(1200);
+            ExitApplication();
+        }
+
+        private async void BtnDismissUpdate_Click(object sender, RoutedEventArgs e)
+        {
+            BorderUpdate.Visibility = Visibility.Collapsed;
+            if (!string.IsNullOrEmpty(_availableUpdate))
+            {
+                // Remembered in the core's state file so the banner does not
+                // come back on the next launch for a version already declined.
+                await _agent.CallRawAsync("dismiss_update",
+                    new Dictionary<string, object> { { "version", _availableUpdate } });
+            }
+        }
+
+        #endregion
 
         private async void ChkAutoRoam_Click(object sender, RoutedEventArgs e)
         {

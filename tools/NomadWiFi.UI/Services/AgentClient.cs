@@ -313,6 +313,19 @@ namespace NomadWiFi.UI.Services
             return CallAsync<T>(method, null, 120000);
         }
 
+        /// <summary>
+        /// Sends a request and returns the raw deserialised result, for replies
+        /// whose shape is loose enough that a typed model would add nothing --
+        /// the update check, whose payload nests a release object.
+        /// Returns null when the call failed, so callers only test for that.
+        /// </summary>
+        public async Task<Dictionary<string, object>> CallRawAsync(string method, object parameters = null, int timeoutMs = 120000)
+        {
+            var response = await CallAsync(method, parameters, timeoutMs).ConfigureAwait(false);
+            if (response == null || !response.ok) return null;
+            return response.result as Dictionary<string, object>;
+        }
+
         public void Dispose()
         {
             _disposed = true;
