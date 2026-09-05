@@ -53,3 +53,36 @@ func TestDirFallsBackToTempNotWorkingDirectory(t *testing.T) {
 		t.Errorf("Dir() = %q, want it under %q", dir, os.TempDir())
 	}
 }
+
+// The app starts with Windows, so a preference that silently reverts to "on"
+// would roam against the user's wishes without them ever seeing it happen.
+func TestAutoRoamDefaultsOnButRemembersOff(t *testing.T) {
+	t.Setenv("USERPROFILE", t.TempDir())
+	Reset()
+
+	if !AutoRoam() {
+		t.Error("with no preference stored, auto-roam should default to on")
+	}
+
+	SetAutoRoam(false)
+	if AutoRoam() {
+		t.Error("auto-roam should be off after being turned off")
+	}
+
+	// Simulate a restart: drop the in-process cache and read the file again.
+	mu.Lock()
+	current = nil
+	mu.Unlock()
+
+	if AutoRoam() {
+		t.Error("auto-roam was turned off but came back on after a restart")
+	}
+
+	SetAutoRoam(true)
+	mu.Lock()
+	current = nil
+	mu.Unlock()
+	if !AutoRoam() {
+		t.Error("auto-roam should be on again after being re-enabled")
+	}
+}

@@ -44,8 +44,12 @@ type State struct {
 	LastUpdateCheck time.Time `json:"last_update_check,omitempty"`
 	// UpdateDismissed is the version the user said no to, so the prompt does
 	// not reappear for a release they have already declined.
-	UpdateDismissed string    `json:"update_dismissed,omitempty"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	UpdateDismissed string `json:"update_dismissed,omitempty"`
+	// AutoRoam is a pointer so "never chosen" is distinguishable from an
+	// explicit false. Without that, turning roaming off could not survive a
+	// restart: the zero value and a deliberate "no" would look identical.
+	AutoRoam  *bool     `json:"auto_roam,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 var (
@@ -331,6 +335,32 @@ func DismissUpdate(version string) {
 	defer mu.Unlock()
 	s := load()
 	s.UpdateDismissed = version
+	save()
+}
+
+// AutoRoam reports whether autonomous roaming is enabled, defaulting to on for
+// a user who has never expressed a preference.
+func AutoRoam() bool {
+	mu.Lock()
+	defer mu.Unlock()
+	v := load().AutoRoam
+	if v == nil {
+		return true
+	}
+	return *v
+}
+
+// SetAutoRoam records the user's choice. This is what stops the setting
+// reverting to on at every launch, which matters more now that NomadWiFi
+// installs itself and starts with Windows.
+func SetAutoRoam(enabled bool) {
+	mu.Lock()
+	defer mu.Unlock()
+	s := load()
+	if s.AutoRoam != nil && *s.AutoRoam == enabled {
+		return
+	}
+	s.AutoRoam = &enabled
 	save()
 }
 

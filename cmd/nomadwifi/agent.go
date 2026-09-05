@@ -51,6 +51,10 @@ func runAgent() {
 	a := &agent{out: json.NewEncoder(os.Stdout)}
 
 	cfg := roam.DefaultConfig()
+	// Honour the user's stored choice rather than defaulting to on every
+	// launch; the app starts with Windows, so a silent revert would be
+	// invisible until it roamed against their wishes.
+	cfg.AutoRoam = state.AutoRoam()
 	a.engine = roam.New(cfg, a.logEvent)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -192,6 +196,7 @@ func (a *agent) handle(ctx context.Context, req agentRequest) {
 	case "set_autoroam":
 		enabled := boolParam(req.Params, "enabled")
 		a.engine.SetAutoRoam(enabled)
+		state.SetAutoRoam(enabled)
 		a.ok(req.ID, map[string]bool{"auto_roam": enabled})
 
 	case "get_autoroam":

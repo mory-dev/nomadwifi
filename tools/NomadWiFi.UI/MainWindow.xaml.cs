@@ -70,6 +70,9 @@ namespace NomadWiFi.UI
             Loaded += async (s, e) =>
             {
                 FitToWorkArea();
+                // Before the minimised early-return: a start-with-Windows
+                // launch still needs the tray menu's checkmark to match.
+                await SyncAutoRoamAsync();
                 if (startMinimized) { Hide(); return; }
                 await RefreshAllAsync();
                 await CheckForUpdateAsync();
@@ -735,6 +738,22 @@ namespace NomadWiFi.UI
         private void BtnDismissCelebration_Click(object sender, RoutedEventArgs e)
         {
             BorderRoamCelebration.Visibility = Visibility.Collapsed;
+        }
+
+        /// <summary>
+        /// Reads the stored auto-roam preference from the core. The checkbox
+        /// used to be hardcoded on at every launch, so turning roaming off
+        /// silently reverted -- which matters on an app that starts with
+        /// Windows and changes the network connection.
+        /// </summary>
+        private async Task SyncAutoRoamAsync()
+        {
+            var result = await _agent.CallRawAsync("get_autoroam");
+            if (result == null) return;
+
+            _isAutoRoamEnabled = ReadBoolField(result, "auto_roam");
+            ChkAutoRoam.IsChecked = _isAutoRoamEnabled;
+            if (_trayMenuAutoRoam != null) _trayMenuAutoRoam.Checked = _isAutoRoamEnabled;
         }
 
         #region Updates
