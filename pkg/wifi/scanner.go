@@ -138,17 +138,21 @@ func RankAccessPoints(aps []AccessPoint) {
 
 // AnnotateAuthStatus classifies each AP by whether we can connect to it today.
 func AnnotateAuthStatus(aps []AccessPoint) {
-	savedMap := savedProfileSet()
+	annotateAuthStatus(aps, savedProfileSet(), GuessPasswordForSSID)
+}
+
+func annotateAuthStatus(aps []AccessPoint, savedMap map[string]bool, guess func(string) (string, string)) {
 
 	for i := range aps {
 		ssid := strings.TrimSpace(aps[i].SSID)
+		aps[i].InferredFrom = ""
 		switch {
 		case isOpenNetwork(aps[i]):
 			aps[i].AuthStatus = AuthStatusOpen
 		case savedMap[strings.ToLower(ssid)]:
 			aps[i].AuthStatus = AuthStatusSaved
 		default:
-			if pwd, source := GuessPasswordForSSID(ssid); pwd != "" {
+			if pwd, source := guess(ssid); pwd != "" {
 				aps[i].AuthStatus = AuthStatusInferred
 				aps[i].InferredFrom = source
 			} else {

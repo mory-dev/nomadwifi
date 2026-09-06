@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSecurityForNetwork(t *testing.T) {
@@ -129,5 +130,26 @@ func TestIsSameHotelVenue(t *testing.T) {
 		if IsSameHotelVenue(p[0], p[1]) {
 			t.Errorf("expected %q and %q to be different venues", p[0], p[1])
 		}
+	}
+}
+
+func TestProfileCacheInvalidationClearsNamesAndPasswords(t *testing.T) {
+	c := &profileCache{
+		names:     []string{"Hotel"},
+		namesAt:   time.Now(),
+		passwords: map[string]string{"hotel": "old-key"},
+	}
+
+	c.invalidate()
+	if c.names != nil {
+		t.Error("profile names should be invalidated")
+	}
+	if len(c.passwords) != 0 {
+		t.Errorf("password cache has %d entries after invalidation, want 0", len(c.passwords))
+	}
+
+	c.remember("Hotel", "new-key")
+	if got := c.passwords["hotel"]; got != "new-key" {
+		t.Errorf("remembered password = %q, want new-key", got)
 	}
 }

@@ -180,6 +180,7 @@ func AddWifiProfileFor(ssid, password string, security SecurityKind, hidden bool
 	}
 
 	profiles.invalidate()
+	profiles.remember(ssid, password)
 	return nil
 }
 
@@ -197,10 +198,11 @@ func DeleteWifiProfile(ssid string) error {
 // key=clear" once per candidate access point, which is what made a scan take
 // seconds rather than milliseconds.
 type profileCache struct {
-	mu        sync.Mutex
-	names     []string
-	namesAt   time.Time
-	passwords map[string]string
+	mu         sync.Mutex
+	names      []string
+	namesAt    time.Time
+	passwords  map[string]string
+	generation uint64
 }
 
 var profiles = &profileCache{passwords: map[string]string{}}
@@ -211,6 +213,21 @@ func (c *profileCache) invalidate() {
 	c.mu.Lock()
 	c.names = nil
 	c.namesAt = time.Time{}
+	c.passwords = map[string]string{}
+	c.generation++
+	c.mu.Unlock()
+}
+
+// remember records a password that this process has just written through
+// netsh. The Windows profile is still the durable source of truth; keeping the
+// freshly supplied value in this short-lived cache avoids a race where the
+// profile exists but netsh has not exposed it to a subsequent scan yet.
+func (c *profileCache) remember(profileName, password string) {
+	c.mu.Lock()
+	if c.passwords == nil {
+		c.passwords = map[string]string{}
+	}
+	c.passwords[strings.ToLower(strings.TrimSpace(profileName))] = password
 	c.mu.Unlock()
 }
 
@@ -222,6 +239,7 @@ func (c *profileCache) list() ([]string, error) {
 		c.mu.Unlock()
 		return out, nil
 	}
+	generation := c.generation
 	c.mu.Unlock()
 
 	cmd := SilentCommand("netsh", "wlan", "show", "profiles")
@@ -241,8 +259,10 @@ func (c *profileCache) list() ([]string, error) {
 	}
 
 	c.mu.Lock()
-	c.names = names
-	c.namesAt = time.Now()
+	if generation == c.generation {
+		c.names = names
+		c.namesAt = time.Now()
+	}
 	c.mu.Unlock()
 
 	result := make([]string, len(names))
@@ -261,6 +281,7 @@ func (c *profileCache) password(profileName string) (string, error) {
 		}
 		return pwd, nil
 	}
+	generation := c.generation
 	c.mu.Unlock()
 
 	cmd := SilentCommand("netsh", "wlan", "show", "profile",
@@ -280,7 +301,12 @@ func (c *profileCache) password(profileName string) (string, error) {
 	}
 
 	c.mu.Lock()
-	c.passwords[key] = pwd
+	if generation == c.generation {
+		c.passwords[key] = pwd
+	} else {
+		c.mu.Unlock()
+		return c.password(profileName)
+	}
 	c.mu.Unlock()
 
 	if pwd == "" {

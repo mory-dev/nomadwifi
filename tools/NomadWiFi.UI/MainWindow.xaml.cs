@@ -35,6 +35,7 @@ namespace NomadWiFi.UI
         private string _pendingModalSsid = "";
         private List<AccessPoint> _currentAps = new List<AccessPoint>();
         private VpnStatus _vpnStatus;
+        private bool _scanRefreshPending;
 
         public MainWindow() : this(false) { }
 
@@ -443,17 +444,30 @@ namespace NomadWiFi.UI
 
         private async Task RefreshScanAsync()
         {
-            if (_isBusy) return;
+            if (_isBusy)
+            {
+                // A password-success refresh must not disappear behind a
+                // background poll that started at the same time.
+                _scanRefreshPending = true;
+                return;
+            }
+
             _isBusy = true;
             try
             {
-                var aps = await _agent.CallAsync<List<AccessPoint>>("scan");
-                if (aps == null) return;
-
-                _currentAps = aps;
-                ItemsAccessPoints.ItemsSource = aps;
-                TxtApCount.Text = aps.Count == 1 ? "1 network in range"
-                                                 : aps.Count + " networks in range";
+                do
+                {
+                    _scanRefreshPending = false;
+                    var aps = await _agent.CallAsync<List<AccessPoint>>("scan");
+                    if (aps != null)
+                    {
+                        _currentAps = aps;
+                        ItemsAccessPoints.ItemsSource = aps;
+                        TxtApCount.Text = aps.Count == 1 ? "1 network in range"
+                                                         : aps.Count + " networks in range";
+                    }
+                }
+                while (_scanRefreshPending);
             }
             finally
             {

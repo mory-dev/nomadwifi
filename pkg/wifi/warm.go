@@ -3,6 +3,7 @@ package wifi
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mory-dev/nomadwifi/pkg/state"
@@ -19,6 +20,8 @@ import (
 
 // DefaultWarmSetSize is how many candidates are kept hot at once.
 const DefaultWarmSetSize = 4
+
+var warmMu sync.Mutex
 
 // WarmResult describes one warming attempt.
 type WarmResult struct {
@@ -70,6 +73,9 @@ func WarmCandidates(aps []AccessPoint, limit int) []AccessPoint {
 
 // WarmVenue provisions profiles for the current venue's roam candidates.
 func WarmVenue(aps []AccessPoint, limit int) []WarmResult {
+	warmMu.Lock()
+	defer warmMu.Unlock()
+
 	candidates := WarmCandidates(aps, limit)
 	results := make([]WarmResult, 0, len(candidates))
 
@@ -83,13 +89,72 @@ func WarmVenue(aps []AccessPoint, limit int) []WarmResult {
 	return results
 }
 
-func warmOne(ap AccessPoint) WarmResult {
-	res := WarmResult{SSID: ap.SSID}
+// warmConnectedVenue immediately prepares the best recognized siblings after
+// a user has supplied a key. It deliberately receives the key directly rather
+// than depending on a second profile read during the same association flow.
+// The normal scanner will still classify every recognized sibling as
+// INFERRED, while only the bounded best set gets a Windows profile now.
+func warmConnectedVenue(currentSSID, password string, limit int) []WarmResult {
+	warmMu.Lock()
+	defer warmMu.Unlock()
 
+	aps, err := ScanNetworks()
+	if err != nil {
+		return nil
+	}
+
+	candidates := warmCandidatesForVenue(aps, currentSSID, limit, nil)
+	results := make([]WarmResult, 0, len(candidates))
+	source := fmt.Sprintf("key from active hotel network '%s'", currentSSID)
+	for _, ap := range candidates {
+		results = append(results, warmOneWithKey(ap, password, source))
+	}
+
+	if current := ExtractVenueRoot(currentSSID); current != "" {
+		state.SetLastVenue(current)
+	}
+	return results
+}
+
+// warmCandidatesForVenue selects same-venue alternatives using an explicit
+// confirmed key. AuthStatus is intentionally not consulted: the initial scan
+// may have marked every sibling LOCKED before the user supplied the key.
+// Passing savedProfiles makes the selection independently testable and lets
+// callers avoid another profile-list query when they already have one.
+func warmCandidatesForVenue(aps []AccessPoint, currentSSID string, limit int, savedProfiles map[string]bool) []AccessPoint {
+	if limit <= 0 {
+		limit = DefaultWarmSetSize
+	}
+	if savedProfiles == nil {
+		savedProfiles = savedProfileSet()
+	}
+
+	var out []AccessPoint
+	for _, ap := range aps {
+		if len(out) >= limit {
+			break
+		}
+		if ap.IsHidden() || strings.EqualFold(ap.SSID, currentSSID) || !IsSameHotelVenue(currentSSID, ap.SSID) {
+			continue
+		}
+		if !SecurityForNetwork(ap.Authentication, ap.Cipher).SupportsAutoProfile() {
+			continue
+		}
+		if savedProfiles[strings.ToLower(strings.TrimSpace(ap.SSID))] {
+			continue
+		}
+		if benched, _ := state.IsPenalized(ap.SSID); benched {
+			continue
+		}
+		out = append(out, ap)
+	}
+	return out
+}
+
+func warmOne(ap AccessPoint) WarmResult {
 	security := SecurityForNetwork(ap.Authentication, ap.Cipher)
 	if !security.SupportsAutoProfile() {
-		res.Skipped = "enterprise network needs manual setup"
-		return res
+		return WarmResult{SSID: ap.SSID, Skipped: "enterprise network needs manual setup"}
 	}
 
 	password := ""
@@ -97,10 +162,23 @@ func warmOne(ap AccessPoint) WarmResult {
 	if security.NeedsPassword() {
 		pwd, from := GuessPasswordForSSID(ap.SSID)
 		if pwd == "" {
-			res.Skipped = "no known or inferable password"
-			return res
+			return WarmResult{SSID: ap.SSID, Skipped: "no known or inferable password"}
 		}
 		password, source = pwd, "key from "+from
+	}
+	return warmOneWithKey(ap, password, source)
+}
+
+func warmOneWithKey(ap AccessPoint, password, source string) WarmResult {
+	res := WarmResult{SSID: ap.SSID}
+	security := SecurityForNetwork(ap.Authentication, ap.Cipher)
+	if !security.SupportsAutoProfile() {
+		res.Skipped = "enterprise network needs manual setup"
+		return res
+	}
+	if security.NeedsPassword() && strings.TrimSpace(password) == "" {
+		res.Skipped = "no known or inferable password"
+		return res
 	}
 
 	if err := AddWifiProfileFor(ap.SSID, password, security, ap.IsHidden()); err != nil {

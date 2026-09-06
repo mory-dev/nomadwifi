@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mory-dev/nomadwifi/pkg/state"
 )
 
 var reInterfaceField = regexp.MustCompile(`^\s*([^:]+?)\s*:\s*(.*)$`)
@@ -182,18 +184,20 @@ func ConnectSSID(ssid string) error {
 	}
 
 	password := ""
+	source := "no key needed on an open network"
 	if security.NeedsPassword() {
-		pwd, source := GuessPasswordForSSID(ssid)
+		pwd, inferredFrom := GuessPasswordForSSID(ssid)
 		if pwd == "" {
 			return fmt.Errorf("no known or inferable password for network '%s'", ssid)
 		}
 		password = pwd
-		_ = source
+		source = inferredFrom
 	}
 
 	if err := AddWifiProfileFor(ssid, password, security, ap.IsHidden()); err != nil {
 		return fmt.Errorf("failed to provision profile for '%s': %w", ssid, err)
 	}
+	state.RecordProvisioned(ssid, "key from "+source)
 
 	return associate(ssid, true)
 }
@@ -215,7 +219,20 @@ func ConnectSSIDWithPassword(ssid, password string) error {
 	if err := AddWifiProfileFor(ssid, password, security, hidden); err != nil {
 		return fmt.Errorf("failed to configure network profile: %w", err)
 	}
-	return associate(ssid, true)
+
+	state.RecordProvisioned(ssid, "user supplied key")
+	if err := associate(ssid, true); err != nil {
+		// This path owns the temporary profile. Do not leave a failed manual
+		// attempt in NomadWiFi's warm-profile bookkeeping.
+		state.ForgetProfile(ssid)
+		return err
+	}
+
+	// The user has just supplied an authoritative venue key. Warm the best
+	// sibling SSIDs before returning so the next UI scan can show them as
+	// connectable without another prompt.
+	_ = warmConnectedVenue(ssid, password, DefaultWarmSetSize)
+	return nil
 }
 
 // associate issues the connect and waits for the adapter to report the SSID.
